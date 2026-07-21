@@ -13,6 +13,11 @@ output "log_bucket_name" {
   value       = module.security_monitoring.log_bucket_name
 }
 
+output "documents_bucket_name" {
+  description = "환자 문서/생성 PDF 저장용 S3 버킷명"
+  value       = module.app.documents_bucket_name
+}
+
 output "guardduty_detector_id" {
   description = "GuardDuty Detector ID"
   value       = module.security_monitoring.guardduty_detector_id

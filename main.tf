@@ -23,10 +23,12 @@ module "app" {
   source = "./modules/app"
 
   project_name          = var.project_name
+  app_git_ref           = var.app_git_ref
   key_pair_name         = var.key_pair_name
   db_username           = var.db_username
   db_password           = var.db_password
   common_tags           = local.common_tags
+  account_id            = local.account_id
   public_subnet_id      = module.networking.public_subnet_id
   private_subnet_ids    = module.networking.private_subnet_ids
   ec2_security_group_id = module.networking.ec2_security_group_id

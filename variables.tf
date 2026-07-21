@@ -18,6 +18,13 @@ variable "key_pair_name" {
   type        = string
 }
 
+# EC2가 clone할 앱 저장소의 브랜치 — SQLi 실습 코드가 병합된 브랜치
+variable "app_git_ref" {
+  description = "EC2 user_data가 clone할 vuln-hospital-booking 브랜치명"
+  type        = string
+  default     = "lab/sqli-ec2-rds"
+}
+
 # RDS PostgreSQL 관리자 계정
 variable "db_username" {
   description = "RDS PostgreSQL 마스터 사용자명"

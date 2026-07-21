@@ -1,0 +1,18 @@
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+
+# SSH 키페어 (개인키 커밋 금지)
+ssh/
+
+# 실제 비밀번호/plan 결과물 (민감정보 포함, 커밋 금지)
+terraform.tfvars
+tfplan

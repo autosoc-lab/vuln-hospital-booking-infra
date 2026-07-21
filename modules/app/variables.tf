@@ -8,6 +8,11 @@ variable "key_pair_name" {
   type        = string
 }
 
+variable "app_git_ref" {
+  description = "EC2 user_data가 clone할 vuln-hospital-booking 브랜치명"
+  type        = string
+}
+
 variable "db_username" {
   description = "RDS PostgreSQL 마스터 사용자명"
   type        = string
@@ -22,6 +27,11 @@ variable "db_password" {
 variable "common_tags" {
   description = "모든 리소스에 공통 적용할 태그"
   type        = map(string)
+}
+
+variable "account_id" {
+  description = "현재 AWS 계정 ID (S3 버킷명 등에 사용)"
+  type        = string
 }
 
 variable "public_subnet_id" {

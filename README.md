@@ -38,3 +38,8 @@ terraform destroy
 ```
 
 `terraform.tfvars`의 `key_pair_name`, `db_password`는 `<CHANGE_ME>`를 실제 값으로 교체한 뒤 실행하세요.
+
+## 앱 배포 동작
+
+- EC2 user_data가 `var.app_git_ref`(기본값 `lab/sqli-ec2-rds`, SQLi 실습 코드 병합 브랜치)를 clone하고, `docker-compose.yml`의 `DATABASE_URL`을 RDS 엔드포인트로 교체한 뒤 `web` 컨테이너만 기동합니다(로컬 db 컨테이너는 사용하지 않음).
+- RDS가 연결 가능해질 때까지 최대 5분 대기한 뒤 `flask init-db`/`seed-db`를 자동 실행하므로, `terraform apply` 완료 후 EC2 퍼블릭 IP로 바로 접속해 실습 계정으로 로그인할 수 있습니다(부팅+시드까지 수 분 소요).
