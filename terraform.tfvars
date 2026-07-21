@@ -1,5 +1,0 @@
-project_name  = "vuln-hospital"
-aws_region    = "ap-northeast-2"
-key_pair_name = "<CHANGE_ME>"
-db_username   = "hospital"
-db_password   = "<CHANGE_ME>"
