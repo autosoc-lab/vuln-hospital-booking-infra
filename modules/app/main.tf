@@ -87,6 +87,39 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "documents" {
   }
 }
 
+# INTENTIONALLY WEAK - FOR LAB USE ONLY
+# SSE-C(Codefinger) 랜섬웨어 실습용 IAM 사용자 — GitHub 등에 액세스 키가
+# 유출된 상황을 가정. documents 버킷에 대한 최소 권한만 부여.
+resource "aws_iam_user" "leaked_s3_key" {
+  name = "${var.project_name}-leaked-s3-key"
+  tags = var.common_tags
+}
+
+resource "aws_iam_user_policy" "leaked_s3_key" {
+  name = "${var.project_name}-leaked-s3-key-policy"
+  user = aws_iam_user.leaked_s3_key.name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["s3:ListBucket"]
+        Resource = aws_s3_bucket.documents.arn
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["s3:GetObject", "s3:PutObject"]
+        Resource = "${aws_s3_bucket.documents.arn}/*"
+      }
+    ]
+  })
+}
+
+resource "aws_iam_access_key" "leaked_s3_key" {
+  user = aws_iam_user.leaked_s3_key.name
+}
+
 # --- EC2 SSH 키페어 (로컬에서 생성한 공개키를 AWS에 등록) ---
 resource "aws_key_pair" "app" {
   key_name   = var.key_pair_name

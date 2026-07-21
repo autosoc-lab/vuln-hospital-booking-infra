@@ -12,3 +12,14 @@ output "documents_bucket_name" {
   description = "문서 저장용 S3 버킷명"
   value       = aws_s3_bucket.documents.bucket
 }
+
+output "leaked_s3_key_access_key_id" {
+  description = "SSE-C 실습용 '유출된' IAM 사용자 Access Key ID"
+  value       = aws_iam_access_key.leaked_s3_key.id
+}
+
+output "leaked_s3_key_secret_access_key" {
+  description = "SSE-C 실습용 '유출된' IAM 사용자 Secret Access Key"
+  value       = aws_iam_access_key.leaked_s3_key.secret
+  sensitive   = true
+}

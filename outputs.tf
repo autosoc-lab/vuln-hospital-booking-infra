@@ -18,6 +18,17 @@ output "documents_bucket_name" {
   value       = module.app.documents_bucket_name
 }
 
+output "leaked_s3_key_access_key_id" {
+  description = "SSE-C 실습용 '유출된' IAM 사용자 Access Key ID"
+  value       = module.app.leaked_s3_key_access_key_id
+}
+
+output "leaked_s3_key_secret_access_key" {
+  description = "SSE-C 실습용 '유출된' IAM 사용자 Secret Access Key"
+  value       = module.app.leaked_s3_key_secret_access_key
+  sensitive   = true
+}
+
 output "guardduty_detector_id" {
   description = "GuardDuty Detector ID"
   value       = module.security_monitoring.guardduty_detector_id
