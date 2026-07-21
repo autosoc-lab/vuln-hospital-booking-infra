@@ -105,6 +105,13 @@ resource "aws_instance" "app" {
   key_name                    = aws_key_pair.app.key_name
   iam_instance_profile        = aws_iam_instance_profile.ec2_ssm.name
 
+  # INTENTIONALLY WEAK - FOR LAB USE ONLY
+  # IMDSv1(토큰 없는 요청)을 허용해서 SSRF를 통한 IAM 자격증명 탈취 시나리오(SSRF.md)를 재현 가능하게 함
+  metadata_options {
+    http_endpoint = "enabled"
+    http_tokens   = "optional"
+  }
+
   user_data = <<-EOF
     #!/bin/bash
     set -e
