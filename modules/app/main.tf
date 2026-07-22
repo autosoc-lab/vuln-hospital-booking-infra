@@ -120,22 +120,15 @@ resource "aws_iam_access_key" "leaked_s3_key" {
   user = aws_iam_user.leaked_s3_key.name
 }
 
-# --- EC2 SSH 키페어 (로컬에서 생성한 공개키를 AWS에 등록) ---
-resource "aws_key_pair" "app" {
-  key_name   = var.key_pair_name
-  public_key = file("${path.root}/ssh/vuln-hospital-lab.pub")
-
-  tags = var.common_tags
-}
-
 # --- EC2 인스턴스 ---
+# 키페어는 root 모듈에서 생성 (app/wazuh 모듈이 동일 키페어를 공유하기 위함)
 resource "aws_instance" "app" {
   ami                         = data.aws_ami.ubuntu.id
   instance_type               = "t3.micro"
   subnet_id                   = var.public_subnet_id
   vpc_security_group_ids      = [var.ec2_security_group_id]
   associate_public_ip_address = true
-  key_name                    = aws_key_pair.app.key_name
+  key_name                    = var.key_pair_name
   iam_instance_profile        = aws_iam_instance_profile.ec2_ssm.name
 
   # INTENTIONALLY WEAK - FOR LAB USE ONLY
@@ -183,6 +176,25 @@ resource "aws_instance" "app" {
 
     # 시드된 문서 원본 파일을 S3로 마이그레이션 (SSE-C 실습 대상)
     docker compose exec -T web flask --app run migrate-storage-to-s3
+
+    # Wazuh 매니저의 에이전트 등록 포트(1515)가 열릴 때까지 대기 (all-in-one 설치는 수 분~10분 이상 소요, 최대 20분 대기)
+    for i in $(seq 1 120); do
+      if (exec 3<>/dev/tcp/${var.wazuh_manager_private_ip}/1515) 2>/dev/null; then
+        exec 3<&- 3>&-
+        break
+      fi
+      sleep 10
+    done
+
+    # Wazuh 에이전트 설치 및 매니저 등록
+    curl -s https://packages.wazuh.com/key/GPG-KEY-WAZUH | gpg --no-default-keyring --keyring gnupg-ring:/usr/share/keyrings/wazuh.gpg --import
+    chmod 644 /usr/share/keyrings/wazuh.gpg
+    echo "deb [signed-by=/usr/share/keyrings/wazuh.gpg] https://packages.wazuh.com/4.x/apt/ stable main" | tee /etc/apt/sources.list.d/wazuh.list
+    apt-get update -y
+    WAZUH_MANAGER='${var.wazuh_manager_private_ip}' apt-get install -y wazuh-agent
+    systemctl daemon-reload
+    systemctl enable wazuh-agent
+    systemctl start wazuh-agent
   EOF
 
   tags = merge(var.common_tags, {

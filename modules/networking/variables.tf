@@ -17,3 +17,8 @@ variable "flow_log_group_arn" {
   description = "VPC Flow Logs를 전송할 CloudWatch Log Group ARN (security_monitoring 모듈에서 생성)"
   type        = string
 }
+
+variable "log_bucket_arn" {
+  description = "VPC Flow Logs를 추가로 전송할 S3 로그 버킷 ARN (security_monitoring 모듈에서 생성, Wazuh가 읽어감)"
+  type        = string
+}

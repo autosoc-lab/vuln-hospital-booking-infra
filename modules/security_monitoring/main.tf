@@ -71,7 +71,8 @@ resource "aws_s3_bucket_lifecycle_configuration" "logs" {
   }
 }
 
-# CloudTrail이 로그를 쓸 수 있도록 허용하는 버킷 정책
+# CloudTrail/VPC Flow Logs/GuardDuty가 로그를 쓸 수 있도록 허용하는 버킷 정책
+# (Wazuh 매니저의 wodle aws-s3 모듈이 이 버킷을 읽어감)
 data "aws_iam_policy_document" "logs_bucket_policy" {
   statement {
     sid    = "AWSCloudTrailAclCheck"
@@ -102,6 +103,76 @@ data "aws_iam_policy_document" "logs_bucket_policy" {
       test     = "StringEquals"
       variable = "s3:x-amz-acl"
       values   = ["bucket-owner-full-control"]
+    }
+  }
+
+  statement {
+    sid    = "AWSLogDeliveryAclCheck"
+    effect = "Allow"
+
+    principals {
+      type        = "Service"
+      identifiers = ["delivery.logs.amazonaws.com"]
+    }
+
+    actions   = ["s3:GetBucketAcl"]
+    resources = [aws_s3_bucket.logs.arn]
+  }
+
+  statement {
+    sid    = "AWSLogDeliveryWrite"
+    effect = "Allow"
+
+    principals {
+      type        = "Service"
+      identifiers = ["delivery.logs.amazonaws.com"]
+    }
+
+    actions   = ["s3:PutObject"]
+    resources = ["${aws_s3_bucket.logs.arn}/AWSLogs/${var.account_id}/vpcflowlogs/*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "s3:x-amz-acl"
+      values   = ["bucket-owner-full-control"]
+    }
+  }
+
+  statement {
+    sid    = "AWSGuardDutyGetBucketLocation"
+    effect = "Allow"
+
+    principals {
+      type        = "Service"
+      identifiers = ["guardduty.amazonaws.com"]
+    }
+
+    actions   = ["s3:GetBucketLocation"]
+    resources = [aws_s3_bucket.logs.arn]
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:SourceAccount"
+      values   = [var.account_id]
+    }
+  }
+
+  statement {
+    sid    = "AWSGuardDutyPutObject"
+    effect = "Allow"
+
+    principals {
+      type        = "Service"
+      identifiers = ["guardduty.amazonaws.com"]
+    }
+
+    actions   = ["s3:PutObject"]
+    resources = ["${aws_s3_bucket.logs.arn}/guardduty/*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:SourceAccount"
+      values   = [var.account_id]
     }
   }
 }
@@ -176,4 +247,55 @@ resource "aws_guardduty_detector_feature" "s3_protection" {
   detector_id = aws_guardduty_detector.main.id
   name        = "S3_DATA_EVENTS"
   status      = "ENABLED"
+}
+
+# --- GuardDuty Findings를 S3로 내보내기 (Wazuh wodle aws-s3가 읽어갈 대상) ---
+# GuardDuty의 S3 export 기능은 SSE-KMS 암호화를 요구하므로 전용 KMS 키를 생성한다.
+resource "aws_kms_key" "guardduty" {
+  description             = "${var.project_name} GuardDuty findings export용 KMS 키"
+  deletion_window_in_days = 7
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "EnableRootAccountAccess"
+        Effect = "Allow"
+        Principal = {
+          AWS = "arn:aws:iam::${var.account_id}:root"
+        }
+        Action   = "kms:*"
+        Resource = "*"
+      },
+      {
+        Sid    = "AllowGuardDutyEncrypt"
+        Effect = "Allow"
+        Principal = {
+          Service = "guardduty.amazonaws.com"
+        }
+        Action   = "kms:GenerateDataKey"
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "aws:SourceAccount" = var.account_id
+          }
+          ArnLike = {
+            "aws:SourceArn" = aws_guardduty_detector.main.arn
+          }
+        }
+      }
+    ]
+  })
+
+  tags = merge(var.common_tags, {
+    Name = "${var.project_name}-guardduty-kms"
+  })
+}
+
+resource "aws_guardduty_publishing_destination" "s3" {
+  detector_id     = aws_guardduty_detector.main.id
+  destination_arn = "${aws_s3_bucket.logs.arn}/guardduty"
+  kms_key_arn     = aws_kms_key.guardduty.arn
+
+  depends_on = [aws_s3_bucket_policy.logs]
 }

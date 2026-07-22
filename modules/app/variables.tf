@@ -53,3 +53,8 @@ variable "rds_security_group_id" {
   description = "RDS에 적용할 보안그룹 ID (networking 모듈에서 전달)"
   type        = string
 }
+
+variable "wazuh_manager_private_ip" {
+  description = "Wazuh 매니저 프라이빗 IP (wazuh 모듈에서 전달, agent 등록용)"
+  type        = string
+}

@@ -38,3 +38,8 @@ output "vpc_id" {
   description = "VPC ID"
   value       = module.networking.vpc_id
 }
+
+output "wazuh_dashboard_url" {
+  description = "Wazuh 대시보드 URL (초기 로그인 정보는 SSH 접속 후 wazuh-install-files.tar 참고)"
+  value       = "https://${module.wazuh.dashboard_public_ip}"
+}

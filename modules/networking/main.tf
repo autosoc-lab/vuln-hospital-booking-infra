@@ -123,6 +123,18 @@ resource "aws_flow_log" "vpc" {
   })
 }
 
+# S3로도 전송 — Wazuh 매니저의 wodle aws-s3(vpcflow)가 이 버킷을 읽어감
+resource "aws_flow_log" "vpc_s3" {
+  vpc_id               = aws_vpc.main.id
+  traffic_type         = "ALL"
+  log_destination_type = "s3"
+  log_destination      = var.log_bucket_arn
+
+  tags = merge(var.common_tags, {
+    Name = "${var.project_name}-vpc-flow-log-s3"
+  })
+}
+
 # --- 보안그룹: EC2용 (의도적으로 느슨하게) ---
 # INTENTIONALLY PERMISSIVE - FOR LAB USE ONLY
 # 0.0.0.0/0 에서 SSH(22) 포함 다중 포트 인바운드 허용 — SIEM/SOAR 탐지 실습을 위한 의도적 취약 설정

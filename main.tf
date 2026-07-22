@@ -12,25 +12,51 @@ module "security_monitoring" {
 module "networking" {
   source = "./modules/networking"
 
-  project_name           = var.project_name
-  common_tags            = local.common_tags
-  flow_log_group_name    = module.security_monitoring.vpc_flow_log_group_name
-  flow_log_group_arn     = module.security_monitoring.vpc_flow_log_group_arn
+  project_name        = var.project_name
+  common_tags         = local.common_tags
+  flow_log_group_name = module.security_monitoring.vpc_flow_log_group_name
+  flow_log_group_arn  = module.security_monitoring.vpc_flow_log_group_arn
+  log_bucket_arn      = module.security_monitoring.log_bucket_arn
 }
 
-# 3. 애플리케이션 계층 — EC2, RDS, Elastic IP
+# EC2 SSH 키페어 — app/wazuh 모듈이 공유하므로 root에서 한 번만 생성
+resource "aws_key_pair" "app" {
+  key_name   = var.key_pair_name
+  public_key = file("${path.root}/ssh/vuln-hospital-lab.pub")
+
+  tags = local.common_tags
+}
+
+# 3. Wazuh 계층 — SIEM 매니저/인덱서/대시보드 (all-in-one)
+# 앱 계층보다 먼저 생성되어야 함 (앱 EC2의 에이전트가 이 매니저 IP로 등록됨)
+module "wazuh" {
+  source = "./modules/wazuh"
+
+  project_name           = var.project_name
+  common_tags            = local.common_tags
+  account_id             = local.account_id
+  vpc_id                 = module.networking.vpc_id
+  public_subnet_id       = module.networking.public_subnet_id
+  key_pair_name          = aws_key_pair.app.key_name
+  app_security_group_id  = module.networking.ec2_security_group_id
+  log_bucket_name        = module.security_monitoring.log_bucket_name
+  log_bucket_arn         = module.security_monitoring.log_bucket_arn
+}
+
+# 4. 애플리케이션 계층 — EC2, RDS, Elastic IP
 module "app" {
   source = "./modules/app"
 
-  project_name          = var.project_name
-  app_git_ref           = var.app_git_ref
-  key_pair_name         = var.key_pair_name
-  db_username           = var.db_username
-  db_password           = var.db_password
-  common_tags           = local.common_tags
-  account_id            = local.account_id
-  public_subnet_id      = module.networking.public_subnet_id
-  private_subnet_ids    = module.networking.private_subnet_ids
-  ec2_security_group_id = module.networking.ec2_security_group_id
-  rds_security_group_id = module.networking.rds_security_group_id
+  project_name             = var.project_name
+  app_git_ref              = var.app_git_ref
+  key_pair_name            = aws_key_pair.app.key_name
+  db_username              = var.db_username
+  db_password              = var.db_password
+  common_tags              = local.common_tags
+  account_id               = local.account_id
+  public_subnet_id         = module.networking.public_subnet_id
+  private_subnet_ids       = module.networking.private_subnet_ids
+  ec2_security_group_id    = module.networking.ec2_security_group_id
+  rds_security_group_id    = module.networking.rds_security_group_id
+  wazuh_manager_private_ip = module.wazuh.manager_private_ip
 }
