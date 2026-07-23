@@ -38,6 +38,13 @@ variable "db_password" {
   sensitive   = true
 }
 
+# free tier/신규 계정은 GuardDuty 구독이 안 되어 있을 수 있음 — 인증 끝나면 true로 변경
+variable "enable_guardduty" {
+  description = "GuardDuty 활성화 여부"
+  type        = bool
+  default     = true
+}
+
 # 현재 호출자의 AWS 계정 ID — S3 버킷명 등에 사용
 data "aws_caller_identity" "current" {}
 

@@ -14,8 +14,8 @@ output "cloudtrail_arn" {
 }
 
 output "guardduty_detector_id" {
-  description = "GuardDuty Detector ID"
-  value       = aws_guardduty_detector.main.id
+  description = "GuardDuty Detector ID (enable_guardduty=false이면 null)"
+  value       = try(aws_guardduty_detector.main[0].id, null)
 }
 
 output "vpc_flow_log_group_name" {

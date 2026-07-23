@@ -16,8 +16,11 @@ resource "aws_cloudwatch_log_group" "cloudtrail" {
 }
 
 # --- S3 버킷 (로그 저장소) ---
+# force_destroy = true — 실습 종료 후 terraform destroy 시 버전 포함 객체가 남아있어도
+# 자동으로 비우고 삭제 (버저닝 켜져 있어 수동 정리가 번거로움)
 resource "aws_s3_bucket" "logs" {
-  bucket = "${var.project_name}-logs-${var.account_id}"
+  bucket        = "${var.project_name}-logs-${var.account_id}"
+  force_destroy = true
 
   tags = merge(var.common_tags, {
     Name = "${var.project_name}-logs"
@@ -232,9 +235,13 @@ resource "aws_cloudtrail" "main" {
 }
 
 # --- GuardDuty ---
+# free tier/신규 계정은 GuardDuty 구독이 안 되어 있을 수 있음 (SubscriptionRequiredException) —
+# var.enable_guardduty로 껐다 켤 수 있게 분리. 계정 인증이 끝나면 true로 바꿔서 재적용.
 # 기본 탐지기 — CloudTrail 이벤트, VPC Flow Logs, DNS 로그를 분석하여
 # 정찰(recon), 자격증명 침해(credential compromise), C2 통신, 크립토재킹 등을 탐지
 resource "aws_guardduty_detector" "main" {
+  count = var.enable_guardduty ? 1 : 0
+
   enable                       = true
   finding_publishing_frequency = "FIFTEEN_MINUTES"
 
@@ -244,7 +251,9 @@ resource "aws_guardduty_detector" "main" {
 # S3 Protection — S3 데이터 이벤트(GetObject/PutObject 등)를 분석하여
 # 비정상적인 대량 다운로드, 알려진 악성 IP/Tor 노드에서의 접근, 자격증명 오남용을 탐지
 resource "aws_guardduty_detector_feature" "s3_protection" {
-  detector_id = aws_guardduty_detector.main.id
+  count = var.enable_guardduty ? 1 : 0
+
+  detector_id = aws_guardduty_detector.main[0].id
   name        = "S3_DATA_EVENTS"
   status      = "ENABLED"
 }
@@ -252,6 +261,8 @@ resource "aws_guardduty_detector_feature" "s3_protection" {
 # --- GuardDuty Findings를 S3로 내보내기 (Wazuh wodle aws-s3가 읽어갈 대상) ---
 # GuardDuty의 S3 export 기능은 SSE-KMS 암호화를 요구하므로 전용 KMS 키를 생성한다.
 resource "aws_kms_key" "guardduty" {
+  count = var.enable_guardduty ? 1 : 0
+
   description             = "${var.project_name} GuardDuty findings export용 KMS 키"
   deletion_window_in_days = 7
 
@@ -280,7 +291,7 @@ resource "aws_kms_key" "guardduty" {
             "aws:SourceAccount" = var.account_id
           }
           ArnLike = {
-            "aws:SourceArn" = aws_guardduty_detector.main.arn
+            "aws:SourceArn" = aws_guardduty_detector.main[0].arn
           }
         }
       }
@@ -293,9 +304,11 @@ resource "aws_kms_key" "guardduty" {
 }
 
 resource "aws_guardduty_publishing_destination" "s3" {
-  detector_id     = aws_guardduty_detector.main.id
+  count = var.enable_guardduty ? 1 : 0
+
+  detector_id     = aws_guardduty_detector.main[0].id
   destination_arn = "${aws_s3_bucket.logs.arn}/guardduty"
-  kms_key_arn     = aws_kms_key.guardduty.arn
+  kms_key_arn     = aws_kms_key.guardduty[0].arn
 
   depends_on = [aws_s3_bucket_policy.logs]
 }

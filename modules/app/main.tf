@@ -60,8 +60,10 @@ resource "aws_iam_instance_profile" "ec2_ssm" {
 }
 
 # --- 문서 저장용 S3 버킷 (환자 문서/생성 PDF) ---
+# force_destroy = true — 실습 종료 후 terraform destroy 시 안에 파일이 남아있어도 자동 삭제
 resource "aws_s3_bucket" "documents" {
-  bucket = "${var.project_name}-documents-${var.account_id}"
+  bucket        = "${var.project_name}-documents-${var.account_id}"
+  force_destroy = true
 
   tags = merge(var.common_tags, {
     Name = "${var.project_name}-documents"
@@ -130,6 +132,8 @@ resource "aws_instance" "app" {
   associate_public_ip_address = true
   key_name                    = var.key_pair_name
   iam_instance_profile        = aws_iam_instance_profile.ec2_ssm.name
+  # user_data는 최초 부팅 때만 실행되므로, wazuh 매니저 IP가 바뀌는 등 user_data 변경 시 새로 만들어 재실행되게 함
+  user_data_replace_on_change = true
 
   # INTENTIONALLY WEAK - FOR LAB USE ONLY
   # IMDSv1(토큰 없는 요청)을 허용해서 SSRF를 통한 IAM 자격증명 탈취 시나리오(SSRF.md)를 재현 가능하게 함

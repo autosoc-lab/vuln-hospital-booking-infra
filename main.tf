@@ -3,9 +3,10 @@
 module "security_monitoring" {
   source = "./modules/security_monitoring"
 
-  project_name = var.project_name
-  account_id   = local.account_id
-  common_tags  = local.common_tags
+  project_name     = var.project_name
+  account_id       = local.account_id
+  common_tags      = local.common_tags
+  enable_guardduty = var.enable_guardduty
 }
 
 # 2. 네트워킹 계층 — VPC, 서브넷, IGW, 라우팅, 보안그룹, VPC Flow Logs

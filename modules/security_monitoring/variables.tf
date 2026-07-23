@@ -12,3 +12,9 @@ variable "common_tags" {
   description = "모든 리소스에 공통 적용할 태그"
   type        = map(string)
 }
+
+variable "enable_guardduty" {
+  description = "GuardDuty 활성화 여부 (free tier/신규 계정은 구독 미인증으로 실패할 수 있어 껐다 켤 수 있게 분리)"
+  type        = bool
+  default     = true
+}
