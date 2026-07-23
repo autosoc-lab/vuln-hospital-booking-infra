@@ -32,7 +32,12 @@ resource "aws_iam_role_policy_attachment" "ec2_ssm" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
-# EC2가 문서 저장용 S3 버킷을 읽고 쓸 수 있도록 부여하는 최소 권한
+# EC2가 문서 저장용 S3 버킷을 읽고 쓸 수 있도록 부여하는 권한
+# INTENTIONALLY OVER-PROVISIONED - FOR LAB USE ONLY
+# 앱 자체는 PutLifecycleConfiguration을 쓸 일이 없으나, Capital One 사고의
+# "역할에 과도한 권한 부여" 원인을 재현하기 위해 의도적으로 포함함.
+# 이 권한 덕분에 SSRF→IMDSv1로 탈취한 임시 자격증명만으로
+# sync(exfil) → SSE-C 재암호화 → lifecycle 삭제 설정까지 전체 체인이 가능해짐.
 resource "aws_iam_role_policy" "documents_s3" {
   name = "${var.project_name}-ec2-documents-s3-policy"
   role = aws_iam_role.ec2_ssm.id
@@ -42,13 +47,18 @@ resource "aws_iam_role_policy" "documents_s3" {
     Statement = [
       {
         Effect   = "Allow"
-        Action   = ["s3:ListBucket"]
+        Action   = ["s3:ListBucket", "s3:GetBucketVersioning", "s3:GetLifecycleConfiguration"]
         Resource = aws_s3_bucket.documents.arn
       },
       {
         Effect   = "Allow"
         Action   = ["s3:GetObject", "s3:PutObject"]
         Resource = "${aws_s3_bucket.documents.arn}/*"
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["s3:PutLifecycleConfiguration"]
+        Resource = aws_s3_bucket.documents.arn
       }
     ]
   })
@@ -87,6 +97,16 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "documents" {
   }
 }
 
+# 버저닝은 켜져 있지만 MFA Delete가 없어 SSE-C 랜섬웨어 시나리오에서
+# 라이프사이클 정책으로 이전 버전까지 삭제되는 것을 막지 못함 (SSE-C.md 3.4 참고)
+resource "aws_s3_bucket_versioning" "documents" {
+  bucket = aws_s3_bucket.documents.id
+
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
 # INTENTIONALLY WEAK - FOR LAB USE ONLY
 # SSE-C(Codefinger) 랜섬웨어 실습용 IAM 사용자 — GitHub 등에 액세스 키가
 # 유출된 상황을 가정. documents 버킷에 대한 최소 권한만 부여.
@@ -104,13 +124,20 @@ resource "aws_iam_user_policy" "leaked_s3_key" {
     Statement = [
       {
         Effect   = "Allow"
-        Action   = ["s3:ListBucket"]
+        Action   = ["s3:ListBucket", "s3:GetBucketVersioning", "s3:GetLifecycleConfiguration"]
         Resource = aws_s3_bucket.documents.arn
       },
       {
         Effect   = "Allow"
         Action   = ["s3:GetObject", "s3:PutObject"]
         Resource = "${aws_s3_bucket.documents.arn}/*"
+      },
+      {
+        # Codefinger 실제 사고와 동일하게, 유출된 키만으로 라이프사이클 정책을 설정해
+        # 재암호화된 객체(및 이전 버전)를 7일 뒤 자동 삭제시킬 수 있음 (SSE-C.md 3.2 [4])
+        Effect   = "Allow"
+        Action   = ["s3:PutLifecycleConfiguration"]
+        Resource = aws_s3_bucket.documents.arn
       }
     ]
   })
