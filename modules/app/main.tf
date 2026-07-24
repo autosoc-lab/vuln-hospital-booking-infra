@@ -38,6 +38,14 @@ resource "aws_iam_role_policy_attachment" "ec2_ssm" {
 # "역할에 과도한 권한 부여" 원인을 재현하기 위해 의도적으로 포함함.
 # 이 권한 덕분에 SSRF→IMDSv1로 탈취한 임시 자격증명만으로
 # sync(exfil) → SSE-C 재암호화 → lifecycle 삭제 설정까지 전체 체인이 가능해짐.
+#
+# GetEncryptionConfiguration/PutEncryptionConfiguration: 2026-04부터 AWS가
+# SSE-C 이력이 없는 버킷에 기본으로 SSE-C 업로드를 차단하기 시작하면서
+# (BlockedEncryptionTypes) 2025년 원본 Codefinger 체인이 이 role 권한만으로는
+# 더 이상 끝까지 재현되지 않게 됨. "SSRF 하나로 전체 체인 완결"이라는 랩 설계
+# 의도를 유지하기 위해, 이 신규 기본 방어까지 무력화할 수 있는 권한을
+# 의도적으로 추가함 — 2025년식 과다권한보다 한 단계 더 심한, 그러나 실제로도
+# 있을 법한 과다권한 설정 실수를 반영.
 resource "aws_iam_role_policy" "documents_s3" {
   name = "${var.project_name}-ec2-documents-s3-policy"
   role = aws_iam_role.ec2_ssm.id
@@ -58,6 +66,11 @@ resource "aws_iam_role_policy" "documents_s3" {
       {
         Effect   = "Allow"
         Action   = ["s3:PutLifecycleConfiguration"]
+        Resource = aws_s3_bucket.documents.arn
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["s3:GetEncryptionConfiguration", "s3:PutEncryptionConfiguration"]
         Resource = aws_s3_bucket.documents.arn
       }
     ]
