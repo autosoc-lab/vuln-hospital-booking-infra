@@ -229,6 +229,39 @@ resource "aws_cloudtrail" "main" {
   cloud_watch_logs_group_arn    = "${aws_cloudwatch_log_group.cloudtrail.arn}:*"
   cloud_watch_logs_role_arn     = aws_iam_role.cloudtrail_to_cloudwatch.arn
 
+  # advanced_event_selector를 하나라도 쓰면 기본 관리 이벤트 로깅이 대체되므로
+  # 관리 이벤트용 셀렉터를 명시적으로 유지한다.
+  advanced_event_selector {
+    name = "Management events"
+
+    field_selector {
+      field  = "eventCategory"
+      equals = ["Management"]
+    }
+  }
+
+  # documents 버킷의 객체 단위 이벤트(GetObject/PutObject)를 데이터 이벤트로 수집.
+  # 기본값은 비활성이라 SSRF→S3 sync(exfil)/SSE-C 재암호화 탐지 룰이 CloudTrail을
+  # 통해 아무것도 볼 수 없었음 (SSE-C.md 3.4 "탐지 강화" 권고 반영).
+  advanced_event_selector {
+    name = "Documents bucket S3 object-level events"
+
+    field_selector {
+      field  = "eventCategory"
+      equals = ["Data"]
+    }
+
+    field_selector {
+      field  = "resources.type"
+      equals = ["AWS::S3::Object"]
+    }
+
+    field_selector {
+      field       = "resources.ARN"
+      starts_with = ["arn:aws:s3:::${var.project_name}-documents-${var.account_id}/"]
+    }
+  }
+
   depends_on = [aws_s3_bucket_policy.logs]
 
   tags = var.common_tags

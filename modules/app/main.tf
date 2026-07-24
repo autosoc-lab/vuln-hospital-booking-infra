@@ -203,6 +203,8 @@ resource "aws_instance" "app" {
     sed -i '/DATABASE_URL:/a\      STORAGE_BACKEND: "s3"' docker-compose.yml
     sed -i '/DATABASE_URL:/a\      DOCUMENT_STORAGE_BUCKET: "${aws_s3_bucket.documents.bucket}"' docker-compose.yml
     sed -i '/DATABASE_URL:/a\      AWS_REGION: "ap-northeast-2"' docker-compose.yml
+    # 앱 요청 로그를 순수 JSON 파일로 남겨서(볼륨 마운트된 ./logs) Wazuh 에이전트가 읽어갈 수 있게 함
+    sed -i '/DATABASE_URL:/a\      APP_LOG_FILE: "/var/log/app/app.log"' docker-compose.yml
 
     docker compose up -d --no-deps web
 
@@ -236,6 +238,18 @@ resource "aws_instance" "app" {
     echo "deb [signed-by=/usr/share/keyrings/wazuh.gpg] https://packages.wazuh.com/4.x/apt/ stable main" | tee /etc/apt/sources.list.d/wazuh.list
     apt-get update -y
     WAZUH_MANAGER='${var.wazuh_manager_private_ip}' apt-get install -y wazuh-agent
+
+    # 앱 요청 로그(./logs/app.log, docker-compose 볼륨 마운트로 호스트의
+    # /opt/app/logs/app.log)를 에이전트가 매니저로 전달하도록 등록.
+    # SSRF/SQLi 등 취약점 호출 자체는 CloudTrail에 안 잡히므로 이 경로가 유일한 가시성 확보 수단.
+    printf '%s\n' \
+      '  <localfile>' \
+      '    <log_format>json</log_format>' \
+      '    <location>/opt/app/logs/app.log</location>' \
+      '  </localfile>' > /tmp/localfile_block.xml
+
+    sed -i '/<ossec_config>/r /tmp/localfile_block.xml' /var/ossec/etc/ossec.conf
+
     systemctl daemon-reload
     systemctl enable wazuh-agent
     systemctl start wazuh-agent

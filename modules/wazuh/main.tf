@@ -184,6 +184,75 @@ resource "aws_instance" "wazuh" {
       '  </wodle>' > /tmp/wodle_block.xml
 
     sed -i '/<ossec_config>/r /tmp/wodle_block.xml' /var/ossec/etc/ossec.conf
+
+    # SSRF -> IMDSv1 -> S3 sync(exfil) -> SSE-C 재암호화 -> lifecycle 삭제 체인 탐지용 커스텀 룰.
+    # GuardDuty가 이미 잡아주는 "탈취한 임시자격증명이 EC2 밖에서 쓰임"(InstanceCredentialExfiltration)
+    # 단계는 별도 룰 없이 기본 aws 룰셋으로 커버되므로 여기서는 다루지 않음.
+    printf '%s\n' \
+      '<group name="vuln_hospital,">' \
+      '' \
+      '  <!-- SSRF: 앱 요청 로그의 url 파라미터가 내부망/클라우드 메타데이터 주소를 가리킴 -->' \
+      '  <rule id="100010" level="0">' \
+      '    <decoded_as>json</decoded_as>' \
+      '    <field name="event">app_request</field>' \
+      '    <description>vuln-hospital-booking application request log</description>' \
+      '  </rule>' \
+      '' \
+      '  <rule id="100011" level="12">' \
+      '    <if_sid>100010</if_sid>' \
+      '    <field name="query_string" type="pcre2">(?i)url=.*(169\.254\.169\.254|127\.0\.0\.1|localhost|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|192\.168\.\d+\.\d+)</field>' \
+      '    <description>SSRF suspected: fetched url parameter targets internal network or cloud metadata address</description>' \
+      '    <mitre>' \
+      '      <id>T1190</id>' \
+      '    </mitre>' \
+      '    <group>ssrf,</group>' \
+      '  </rule>' \
+      '' \
+      '  <!-- S3 대량 다운로드(sync)를 통한 외부 유출 -->' \
+      '  <rule id="100020" level="3">' \
+      '    <decoded_as>json</decoded_as>' \
+      '    <field name="aws.eventName">^GetObject$</field>' \
+      '    <field name="aws.requestParameters.bucketName" type="pcre2">-documents-</field>' \
+      '    <description>Document bucket object download (GetObject)</description>' \
+      '    <group>s3_exfil,</group>' \
+      '  </rule>' \
+      '' \
+      '  <rule id="100021" level="12" frequency="5" timeframe="120">' \
+      '    <if_matched_sid>100020</if_matched_sid>' \
+      '    <same_field>aws.userIdentity.arn</same_field>' \
+      '    <description>Bulk document bucket download by same identity in short window - s3 sync exfil suspected</description>' \
+      '    <mitre>' \
+      '      <id>T1530</id>' \
+      '    </mitre>' \
+      '    <group>s3_exfil,</group>' \
+      '  </rule>' \
+      '' \
+      '  <!-- SSE-C 커스텀 키 재암호화 (Codefinger 랜섬웨어 패턴) -->' \
+      '  <rule id="100030" level="12">' \
+      '    <decoded_as>json</decoded_as>' \
+      '    <field name="aws.eventName">^PutObject$</field>' \
+      '    <field name="aws.requestParameters.x-amz-server-side-encryption-customer-algorithm" type="pcre2">.+</field>' \
+      '    <description>S3 object re-encrypted with SSE-C customer key - Codefinger ransomware pattern</description>' \
+      '    <mitre>' \
+      '      <id>T1486</id>' \
+      '    </mitre>' \
+      '    <group>s3_ransomware,</group>' \
+      '  </rule>' \
+      '' \
+      '  <!-- 라이프사이클 정책 변경으로 자동삭제 설정 (복구 불능화) -->' \
+      '  <rule id="100031" level="10">' \
+      '    <decoded_as>json</decoded_as>' \
+      '    <field name="aws.eventName">^PutBucketLifecycleConfiguration$</field>' \
+      '    <field name="aws.requestParameters.bucketName" type="pcre2">-documents-</field>' \
+      '    <description>Document bucket lifecycle policy changed - possible SSE-C ransomware auto-delete stage</description>' \
+      '    <mitre>' \
+      '      <id>T1485</id>' \
+      '    </mitre>' \
+      '    <group>s3_ransomware,</group>' \
+      '  </rule>' \
+      '' \
+      '</group>' > /var/ossec/etc/rules/local_rules.xml
+
     systemctl restart wazuh-manager
   EOF
 
