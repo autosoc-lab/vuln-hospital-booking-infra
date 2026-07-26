@@ -17,18 +17,3 @@ output "guardduty_detector_id" {
   description = "GuardDuty Detector ID (enable_guardduty=false이면 null)"
   value       = try(aws_guardduty_detector.main[0].id, null)
 }
-
-output "vpc_flow_log_group_name" {
-  description = "VPC Flow Logs CloudWatch Log Group 이름 (networking 모듈에서 참조)"
-  value       = aws_cloudwatch_log_group.vpc_flow_logs.name
-}
-
-output "vpc_flow_log_group_arn" {
-  description = "VPC Flow Logs CloudWatch Log Group ARN (networking 모듈에서 참조)"
-  value       = aws_cloudwatch_log_group.vpc_flow_logs.arn
-}
-
-output "cloudtrail_log_group_name" {
-  description = "CloudTrail CloudWatch Log Group 이름"
-  value       = aws_cloudwatch_log_group.cloudtrail.name
-}

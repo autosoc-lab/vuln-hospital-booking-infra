@@ -73,57 +73,7 @@ resource "aws_route_table_association" "public" {
 }
 
 # --- VPC Flow Logs ---
-# CloudWatch Logs로 전송할 IAM Role — Flow Logs 서비스가 로그 스트림에 쓸 수 있어야 함
-resource "aws_iam_role" "flow_log" {
-  name = "${var.project_name}-flow-log-role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect = "Allow"
-      Principal = {
-        Service = "vpc-flow-logs.amazonaws.com"
-      }
-      Action = "sts:AssumeRole"
-    }]
-  })
-
-  tags = var.common_tags
-}
-
-resource "aws_iam_role_policy" "flow_log" {
-  name = "${var.project_name}-flow-log-policy"
-  role = aws_iam_role.flow_log.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect = "Allow"
-      Action = [
-        "logs:CreateLogGroup",
-        "logs:CreateLogStream",
-        "logs:PutLogEvents",
-        "logs:DescribeLogGroups",
-        "logs:DescribeLogStreams"
-      ]
-      Resource = "${var.flow_log_group_arn}:*"
-    }]
-  })
-}
-
-resource "aws_flow_log" "vpc" {
-  vpc_id               = aws_vpc.main.id
-  traffic_type         = "ALL"
-  log_destination_type = "cloud-watch-logs"
-  log_destination      = var.flow_log_group_arn
-  iam_role_arn         = aws_iam_role.flow_log.arn
-
-  tags = merge(var.common_tags, {
-    Name = "${var.project_name}-vpc-flow-log"
-  })
-}
-
-# S3로도 전송 — Wazuh 매니저의 wodle aws-s3(vpcflow)가 이 버킷을 읽어감
+# S3로 전송 — Wazuh 매니저의 wodle aws-s3(vpcflow)가 이 버킷을 읽어감
 resource "aws_flow_log" "vpc_s3" {
   vpc_id               = aws_vpc.main.id
   traffic_type         = "ALL"

@@ -58,3 +58,8 @@ variable "wazuh_manager_private_ip" {
   description = "Wazuh 매니저 프라이빗 IP (wazuh 모듈에서 전달, agent 등록용)"
   type        = string
 }
+
+variable "wazuh_version" {
+  description = "설치할 Wazuh agent major.minor 버전 (wazuh 모듈의 매니저와 반드시 일치해야 함)"
+  type        = string
+}

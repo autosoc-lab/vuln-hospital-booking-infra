@@ -1,20 +1,3 @@
-# --- CloudWatch Log Groups ---
-# VPC Flow Logs 수신 — networking 모듈의 aws_flow_log가 이 로그 그룹을 참조한다
-resource "aws_cloudwatch_log_group" "vpc_flow_logs" {
-  name              = "/aws/vpc/flowlogs"
-  retention_in_days = 30
-
-  tags = var.common_tags
-}
-
-# CloudTrail 로그 수신
-resource "aws_cloudwatch_log_group" "cloudtrail" {
-  name              = "/aws/cloudtrail/${var.project_name}"
-  retention_in_days = 30
-
-  tags = var.common_tags
-}
-
 # --- S3 버킷 (로그 저장소) ---
 # force_destroy = true — 실습 종료 후 terraform destroy 시 버전 포함 객체가 남아있어도
 # 자동으로 비우고 삭제 (버저닝 켜져 있어 수동 정리가 번거로움)
@@ -186,48 +169,11 @@ resource "aws_s3_bucket_policy" "logs" {
 }
 
 # --- CloudTrail ---
-# CloudTrail → CloudWatch Logs 전송용 IAM Role
-resource "aws_iam_role" "cloudtrail_to_cloudwatch" {
-  name = "${var.project_name}-cloudtrail-cwl-role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect = "Allow"
-      Principal = {
-        Service = "cloudtrail.amazonaws.com"
-      }
-      Action = "sts:AssumeRole"
-    }]
-  })
-
-  tags = var.common_tags
-}
-
-resource "aws_iam_role_policy" "cloudtrail_to_cloudwatch" {
-  name = "${var.project_name}-cloudtrail-cwl-policy"
-  role = aws_iam_role.cloudtrail_to_cloudwatch.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect = "Allow"
-      Action = [
-        "logs:CreateLogStream",
-        "logs:PutLogEvents"
-      ]
-      Resource = "${aws_cloudwatch_log_group.cloudtrail.arn}:*"
-    }]
-  })
-}
-
 resource "aws_cloudtrail" "main" {
-  name                          = "${var.project_name}-trail"
-  s3_bucket_name                = aws_s3_bucket.logs.id
-  is_multi_region_trail         = false
-  enable_log_file_validation    = true
-  cloud_watch_logs_group_arn    = "${aws_cloudwatch_log_group.cloudtrail.arn}:*"
-  cloud_watch_logs_role_arn     = aws_iam_role.cloudtrail_to_cloudwatch.arn
+  name                       = "${var.project_name}-trail"
+  s3_bucket_name             = aws_s3_bucket.logs.id
+  is_multi_region_trail      = false
+  enable_log_file_validation = true
 
   # advanced_event_selector를 하나라도 쓰면 기본 관리 이벤트 로깅이 대체되므로
   # 관리 이벤트용 셀렉터를 명시적으로 유지한다.

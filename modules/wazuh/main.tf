@@ -161,7 +161,7 @@ resource "aws_instance" "wazuh" {
     echo '/swapfile none swap sw 0 0' >> /etc/fstab
 
     # Wazuh all-in-one 설치 (manager + indexer + dashboard)
-    curl -sO https://packages.wazuh.com/4.9/wazuh-install.sh
+    curl -sO https://packages.wazuh.com/${var.wazuh_version}/wazuh-install.sh
     bash wazuh-install.sh -a --ignore-check
 
     # wodle aws-s3: CloudTrail/VPC Flow Logs/GuardDuty를 S3에서 읽어오도록 설정

@@ -38,6 +38,14 @@ variable "db_password" {
   sensitive   = true
 }
 
+# Wazuh 매니저/에이전트 버전 (major.minor) — 둘 다 이 값을 참조해서 버전을 맞춘다.
+# Wazuh는 에이전트 버전이 매니저 버전보다 높으면 등록을 거부하므로 반드시 동일해야 함.
+variable "wazuh_version" {
+  description = "Wazuh 매니저/에이전트 major.minor 버전"
+  type        = string
+  default     = "4.9"
+}
+
 # free tier/신규 계정은 GuardDuty 구독이 안 되어 있을 수 있음 — 인증 끝나면 true로 변경
 variable "enable_guardduty" {
   description = "GuardDuty 활성화 여부"

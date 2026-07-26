@@ -13,11 +13,9 @@ module "security_monitoring" {
 module "networking" {
   source = "./modules/networking"
 
-  project_name        = var.project_name
-  common_tags         = local.common_tags
-  flow_log_group_name = module.security_monitoring.vpc_flow_log_group_name
-  flow_log_group_arn  = module.security_monitoring.vpc_flow_log_group_arn
-  log_bucket_arn      = module.security_monitoring.log_bucket_arn
+  project_name   = var.project_name
+  common_tags    = local.common_tags
+  log_bucket_arn = module.security_monitoring.log_bucket_arn
 }
 
 # EC2 SSH 키페어 — app/wazuh 모듈이 공유하므로 root에서 한 번만 생성
@@ -33,15 +31,16 @@ resource "aws_key_pair" "app" {
 module "wazuh" {
   source = "./modules/wazuh"
 
-  project_name           = var.project_name
-  common_tags            = local.common_tags
-  account_id             = local.account_id
-  vpc_id                 = module.networking.vpc_id
-  public_subnet_id       = module.networking.public_subnet_id
-  key_pair_name          = aws_key_pair.app.key_name
-  app_security_group_id  = module.networking.ec2_security_group_id
-  log_bucket_name        = module.security_monitoring.log_bucket_name
-  log_bucket_arn         = module.security_monitoring.log_bucket_arn
+  project_name          = var.project_name
+  common_tags           = local.common_tags
+  account_id            = local.account_id
+  vpc_id                = module.networking.vpc_id
+  public_subnet_id      = module.networking.public_subnet_id
+  key_pair_name         = aws_key_pair.app.key_name
+  app_security_group_id = module.networking.ec2_security_group_id
+  log_bucket_name       = module.security_monitoring.log_bucket_name
+  log_bucket_arn        = module.security_monitoring.log_bucket_arn
+  wazuh_version         = var.wazuh_version
 }
 
 # 4. 애플리케이션 계층 — EC2, RDS, Elastic IP
@@ -60,4 +59,5 @@ module "app" {
   ec2_security_group_id    = module.networking.ec2_security_group_id
   rds_security_group_id    = module.networking.rds_security_group_id
   wazuh_manager_private_ip = module.wazuh.manager_private_ip
+  wazuh_version            = var.wazuh_version
 }

@@ -42,3 +42,8 @@ variable "log_bucket_arn" {
   description = "위 로그 버킷의 ARN"
   type        = string
 }
+
+variable "wazuh_version" {
+  description = "설치할 Wazuh major.minor 버전 (app 모듈의 에이전트와 반드시 일치해야 함)"
+  type        = string
+}

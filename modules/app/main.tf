@@ -233,11 +233,16 @@ resource "aws_instance" "app" {
     done
 
     # Wazuh 에이전트 설치 및 매니저 등록
+    # 저장소 자체는 major.minor별 경로(예: 4.9/apt)가 더 이상 서비스되지 않아 4.x(rolling)를 써야 하지만,
+    # apt-get install에 패키지 버전을 명시해서 매니저(wazuh 모듈에서 wazuh_version으로 고정 설치)와
+    # 동일한 major.minor로 맞춘다. Wazuh는 "에이전트 버전 <= 매니저 버전"만 등록을 허용하므로,
+    # 버전이 어긋나면(예: 에이전트가 매니저보다 최신) 등록이 거부된다.
     curl -s https://packages.wazuh.com/key/GPG-KEY-WAZUH | gpg --no-default-keyring --keyring gnupg-ring:/usr/share/keyrings/wazuh.gpg --import
     chmod 644 /usr/share/keyrings/wazuh.gpg
     echo "deb [signed-by=/usr/share/keyrings/wazuh.gpg] https://packages.wazuh.com/4.x/apt/ stable main" | tee /etc/apt/sources.list.d/wazuh.list
     apt-get update -y
-    WAZUH_MANAGER='${var.wazuh_manager_private_ip}' apt-get install -y wazuh-agent
+    AGENT_VERSION=$(apt-cache madison wazuh-agent | awk '{print $3}' | grep "^${var.wazuh_version}\." | sort -V | tail -n1)
+    WAZUH_MANAGER='${var.wazuh_manager_private_ip}' apt-get install -y wazuh-agent=$AGENT_VERSION
 
     # 앱 요청 로그(./logs/app.log, docker-compose 볼륨 마운트로 호스트의
     # /opt/app/logs/app.log)를 에이전트가 매니저로 전달하도록 등록.
