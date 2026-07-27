@@ -1,0 +1,15 @@
+<!--
+  Decoders for Flask stdout lines emitted by app.logger:
+    app_event {"event":"app_request",...}
+    security_event {"event":"security_event",...}
+-->
+
+<decoder name="hospital-app-event">
+  <prematch>app_event </prematch>
+  <plugin_decoder offset="after_prematch">JSON_Decoder</plugin_decoder>
+</decoder>
+
+<decoder name="hospital-security-event">
+  <prematch>security_event </prematch>
+  <plugin_decoder offset="after_prematch">JSON_Decoder</plugin_decoder>
+</decoder>

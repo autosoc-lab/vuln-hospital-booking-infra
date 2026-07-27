@@ -139,6 +139,23 @@ resource "aws_iam_instance_profile" "wazuh_ec2" {
   role = aws_iam_role.wazuh_ec2.name
 }
 
+# vuln_hospital_sqli_pdf_rce.xml/디코더는 EC2 user_data 16KB 한도를 넘어서 직접 임베드할 수 없다.
+# 이미 CloudTrail/VPC Flow Logs가 쌓이는 로그 버킷에 별도 prefix로 얹어두고, wazuh EC2 역할이
+# 이미 그 버킷 전체에 대해 가진 s3:GetObject/ListBucket 권한(wazuh_logs_read)을 그대로 재사용한다.
+resource "aws_s3_object" "hospital_rules" {
+  bucket      = var.log_bucket_name
+  key         = "wazuh-rules/vuln_hospital_sqli_pdf_rce.xml"
+  content     = file("${path.module}/files/vuln_hospital_sqli_pdf_rce.xml")
+  etag        = filemd5("${path.module}/files/vuln_hospital_sqli_pdf_rce.xml")
+}
+
+resource "aws_s3_object" "hospital_decoders" {
+  bucket      = var.log_bucket_name
+  key         = "wazuh-rules/vuln_hospital_decoders.xml"
+  content     = file("${path.module}/files/vuln_hospital_decoders.xml")
+  etag        = filemd5("${path.module}/files/vuln_hospital_decoders.xml")
+}
+
 # --- Wazuh 매니저/인덱서/대시보드 (all-in-one 단일 노드) ---
 resource "aws_instance" "wazuh" {
   ami                         = data.aws_ami.ubuntu.id
@@ -150,6 +167,8 @@ resource "aws_instance" "wazuh" {
   iam_instance_profile        = aws_iam_instance_profile.wazuh_ec2.name
   # user_data는 최초 부팅 때만 실행되므로, 바뀔 때마다 인스턴스를 새로 만들어 cloud-init이 다시 돌게 함
   user_data_replace_on_change = true
+  # S3에 룰/디코더 파일이 먼저 올라가 있어야 user_data의 aws s3 cp가 성공한다
+  depends_on = [aws_s3_object.hospital_rules, aws_s3_object.hospital_decoders]
 
   # 기본 8GB로는 indexer(850MB+)/manager/filebeat/dashboard 설치 중 디스크가 꽉 참
   root_block_device {
@@ -185,14 +204,14 @@ resource "aws_instance" "wazuh" {
     ${file("${path.module}/files/local_rules.xml")}
     LOCAL_RULES_XML
 
-    # 앱 레포(vuln-hospital-booking)의 detection-rules/vuln_hospital_rules.xml을 그대로 받아옴.
-    # access.log(event=access_request)의 SQLi/문서다운로드/킬체인 상관분석 룰.
-    # app 모듈이 clone하는 것과 동일한 git ref(${var.app_git_ref})에서 매번 최신 내용을 받아오므로
-    # 여기 별도 사본을 두지 않아도 되고, 원본이 바뀌어도 수동 동기화가 필요 없음.
-    # local_rules.xml과는 별도 파일이지만, Wazuh가 /var/ossec/etc/rules/ 안의 모든 xml을
-    # 스캔해서 로드하므로(rule_dir) 같이 로드되며 룰 ID(100300~100312)도 겹치지 않는다.
-    curl -sfL "https://raw.githubusercontent.com/autosoc-lab/vuln-hospital-booking/${var.app_git_ref}/detection-rules/vuln_hospital_rules.xml" \
-      -o /var/ossec/etc/rules/vuln_hospital_app_rules.xml
+    # access.log SQLi/문서다운로드/킬체인 + Flask stdout app_event/security_event(세션 하이재킹, PDF RCE) +
+    # audit/네트워크 상관분석까지 포함하는 통합 룰셋. 앱 레포 detection-rules/vuln_hospital_rules.xml은
+    # 이 파일로 대체되었으므로 더 이상 받아오지 않는다(룰 ID 100300번대가 겹쳐 동시 로드 시 충돌함).
+    # 이 파일(+디코더)은 EC2 user_data의 16KB 한도를 넘어서 직접 임베드할 수 없어 S3에 올려두고 받아온다.
+    apt-get update -y
+    apt-get install -y awscli
+    aws s3 cp "s3://${var.log_bucket_name}/wazuh-rules/vuln_hospital_sqli_pdf_rce.xml" /var/ossec/etc/rules/vuln_hospital_sqli_pdf_rce.xml
+    aws s3 cp "s3://${var.log_bucket_name}/wazuh-rules/vuln_hospital_decoders.xml" /var/ossec/etc/decoders/vuln_hospital_decoders.xml
 
     systemctl restart wazuh-manager
   EOF
