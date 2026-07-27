@@ -1,0 +1,8 @@
+  <localfile>
+    <log_format>json</log_format>
+    <location>/opt/app/logs/app.log</location>
+  </localfile>
+  <localfile>
+    <log_format>json</log_format>
+    <location>/opt/app/logs/access.log</location>
+  </localfile>

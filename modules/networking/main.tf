@@ -25,8 +25,8 @@ resource "aws_subnet" "public" {
 # Private subnet — RDS 배치용
 resource "aws_subnet" "private" {
   vpc_id            = aws_vpc.main.id
-  cidr_block         = "10.0.2.0/24"
-  availability_zone  = "ap-northeast-2c"
+  cidr_block        = "10.0.2.0/24"
+  availability_zone = "ap-northeast-2c"
 
   tags = merge(var.common_tags, {
     Name = "${var.project_name}-private-subnet"
@@ -36,8 +36,8 @@ resource "aws_subnet" "private" {
 # Private subnet 2 — RDS DB Subnet Group은 최소 2개 AZ가 필요하므로 추가
 resource "aws_subnet" "private_2" {
   vpc_id            = aws_vpc.main.id
-  cidr_block         = "10.0.3.0/24"
-  availability_zone  = "ap-northeast-2a"
+  cidr_block        = "10.0.3.0/24"
+  availability_zone = "ap-northeast-2a"
 
   tags = merge(var.common_tags, {
     Name = "${var.project_name}-private-subnet-2"

@@ -117,6 +117,13 @@ resource "aws_iam_role_policy" "wazuh_logs_read" {
         Effect   = "Allow"
         Action   = ["s3:GetObject"]
         Resource = "${var.log_bucket_arn}/*"
+      },
+      {
+        # wodle aws-s3의 vpcflow 버킷 타입이 로그 포맷 확인을 위해 호출함.
+        # Describe류 EC2 API라 리소스 단위 제한이 불가능해 Resource="*" 필요.
+        Effect   = "Allow"
+        Action   = ["ec2:DescribeFlowLogs"]
+        Resource = "*"
       }
     ]
   })
@@ -165,93 +172,27 @@ resource "aws_instance" "wazuh" {
     bash wazuh-install.sh -a --ignore-check
 
     # wodle aws-s3: CloudTrail/VPC Flow Logs/GuardDuty를 S3에서 읽어오도록 설정
-    printf '%s\n' \
-      '  <wodle name="aws-s3">' \
-      '    <disabled>no</disabled>' \
-      '    <interval>10m</interval>' \
-      '    <run_on_start>yes</run_on_start>' \
-      '    <bucket type="cloudtrail">' \
-      "      <name>${var.log_bucket_name}</name>" \
-      '      <path>AWSLogs</path>' \
-      '    </bucket>' \
-      '    <bucket type="vpcflow">' \
-      "      <name>${var.log_bucket_name}</name>" \
-      '    </bucket>' \
-      '    <bucket type="guardduty">' \
-      "      <name>${var.log_bucket_name}</name>" \
-      '      <path>guardduty</path>' \
-      '    </bucket>' \
-      '  </wodle>' > /tmp/wodle_block.xml
+    cat > /tmp/wodle_block.xml <<'WODLE_XML'
+    ${templatefile("${path.module}/files/wodle_aws_s3.xml.tpl", { log_bucket_name = var.log_bucket_name })}
+    WODLE_XML
 
     sed -i '/<ossec_config>/r /tmp/wodle_block.xml' /var/ossec/etc/ossec.conf
 
     # SSRF -> IMDSv1 -> S3 sync(exfil) -> SSE-C 재암호화 -> lifecycle 삭제 체인 탐지용 커스텀 룰.
     # GuardDuty가 이미 잡아주는 "탈취한 임시자격증명이 EC2 밖에서 쓰임"(InstanceCredentialExfiltration)
     # 단계는 별도 룰 없이 기본 aws 룰셋으로 커버되므로 여기서는 다루지 않음.
-    printf '%s\n' \
-      '<group name="vuln_hospital,">' \
-      '' \
-      '  <!-- SSRF: 앱 요청 로그의 url 파라미터가 내부망/클라우드 메타데이터 주소를 가리킴 -->' \
-      '  <rule id="100010" level="0">' \
-      '    <decoded_as>json</decoded_as>' \
-      '    <field name="event">app_request</field>' \
-      '    <description>vuln-hospital-booking application request log</description>' \
-      '  </rule>' \
-      '' \
-      '  <rule id="100011" level="12">' \
-      '    <if_sid>100010</if_sid>' \
-      '    <field name="query_string" type="pcre2">(?i)url=.*(169\.254\.169\.254|127\.0\.0\.1|localhost|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|192\.168\.\d+\.\d+)</field>' \
-      '    <description>SSRF suspected: fetched url parameter targets internal network or cloud metadata address</description>' \
-      '    <mitre>' \
-      '      <id>T1190</id>' \
-      '    </mitre>' \
-      '    <group>ssrf,</group>' \
-      '  </rule>' \
-      '' \
-      '  <!-- S3 대량 다운로드(sync)를 통한 외부 유출 -->' \
-      '  <rule id="100020" level="3">' \
-      '    <decoded_as>json</decoded_as>' \
-      '    <field name="aws.eventName">^GetObject$</field>' \
-      '    <field name="aws.requestParameters.bucketName" type="pcre2">-documents-</field>' \
-      '    <description>Document bucket object download (GetObject)</description>' \
-      '    <group>s3_exfil,</group>' \
-      '  </rule>' \
-      '' \
-      '  <rule id="100021" level="12" frequency="5" timeframe="120">' \
-      '    <if_matched_sid>100020</if_matched_sid>' \
-      '    <same_field>aws.userIdentity.arn</same_field>' \
-      '    <description>Bulk document bucket download by same identity in short window - s3 sync exfil suspected</description>' \
-      '    <mitre>' \
-      '      <id>T1530</id>' \
-      '    </mitre>' \
-      '    <group>s3_exfil,</group>' \
-      '  </rule>' \
-      '' \
-      '  <!-- SSE-C 커스텀 키 재암호화 (Codefinger 랜섬웨어 패턴) -->' \
-      '  <rule id="100030" level="12">' \
-      '    <decoded_as>json</decoded_as>' \
-      '    <field name="aws.eventName">^PutObject$</field>' \
-      '    <field name="aws.requestParameters.x-amz-server-side-encryption-customer-algorithm" type="pcre2">.+</field>' \
-      '    <description>S3 object re-encrypted with SSE-C customer key - Codefinger ransomware pattern</description>' \
-      '    <mitre>' \
-      '      <id>T1486</id>' \
-      '    </mitre>' \
-      '    <group>s3_ransomware,</group>' \
-      '  </rule>' \
-      '' \
-      '  <!-- 라이프사이클 정책 변경으로 자동삭제 설정 (복구 불능화) -->' \
-      '  <rule id="100031" level="10">' \
-      '    <decoded_as>json</decoded_as>' \
-      '    <field name="aws.eventName">^PutBucketLifecycleConfiguration$</field>' \
-      '    <field name="aws.requestParameters.bucketName" type="pcre2">-documents-</field>' \
-      '    <description>Document bucket lifecycle policy changed - possible SSE-C ransomware auto-delete stage</description>' \
-      '    <mitre>' \
-      '      <id>T1485</id>' \
-      '    </mitre>' \
-      '    <group>s3_ransomware,</group>' \
-      '  </rule>' \
-      '' \
-      '</group>' > /var/ossec/etc/rules/local_rules.xml
+    cat > /var/ossec/etc/rules/local_rules.xml <<'LOCAL_RULES_XML'
+    ${file("${path.module}/files/local_rules.xml")}
+    LOCAL_RULES_XML
+
+    # 앱 레포(vuln-hospital-booking)의 detection-rules/vuln_hospital_rules.xml을 그대로 받아옴.
+    # access.log(event=access_request)의 SQLi/문서다운로드/킬체인 상관분석 룰.
+    # app 모듈이 clone하는 것과 동일한 git ref(${var.app_git_ref})에서 매번 최신 내용을 받아오므로
+    # 여기 별도 사본을 두지 않아도 되고, 원본이 바뀌어도 수동 동기화가 필요 없음.
+    # local_rules.xml과는 별도 파일이지만, Wazuh가 /var/ossec/etc/rules/ 안의 모든 xml을
+    # 스캔해서 로드하므로(rule_dir) 같이 로드되며 룰 ID(100300~100312)도 겹치지 않는다.
+    curl -sfL "https://raw.githubusercontent.com/autosoc-lab/vuln-hospital-booking/${var.app_git_ref}/detection-rules/vuln_hospital_rules.xml" \
+      -o /var/ossec/etc/rules/vuln_hospital_app_rules.xml
 
     systemctl restart wazuh-manager
   EOF

@@ -41,6 +41,7 @@ module "wazuh" {
   log_bucket_name       = module.security_monitoring.log_bucket_name
   log_bucket_arn        = module.security_monitoring.log_bucket_arn
   wazuh_version         = var.wazuh_version
+  app_git_ref           = var.app_git_ref
 }
 
 # 4. 애플리케이션 계층 — EC2, RDS, Elastic IP

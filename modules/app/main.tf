@@ -244,14 +244,14 @@ resource "aws_instance" "app" {
     AGENT_VERSION=$(apt-cache madison wazuh-agent | awk '{print $3}' | grep "^${var.wazuh_version}\." | sort -V | tail -n1)
     WAZUH_MANAGER='${var.wazuh_manager_private_ip}' apt-get install -y wazuh-agent=$AGENT_VERSION
 
-    # 앱 요청 로그(./logs/app.log, docker-compose 볼륨 마운트로 호스트의
-    # /opt/app/logs/app.log)를 에이전트가 매니저로 전달하도록 등록.
+    # 앱 요청 로그를 에이전트가 매니저로 전달하도록 등록 (둘 다 docker-compose
+    # 볼륨 마운트로 호스트의 /opt/app/logs/ 아래에 생김).
     # SSRF/SQLi 등 취약점 호출 자체는 CloudTrail에 안 잡히므로 이 경로가 유일한 가시성 확보 수단.
-    printf '%s\n' \
-      '  <localfile>' \
-      '    <log_format>json</log_format>' \
-      '    <location>/opt/app/logs/app.log</location>' \
-      '  </localfile>' > /tmp/localfile_block.xml
+    # - app.log: event=app_request (SSRF 탐지, local_rules.xml 100010/100011)
+    # - access.log: event=access_request (SQLi/문서다운로드 탐지, vuln_hospital_app_rules.xml 100300번대)
+    cat > /tmp/localfile_block.xml <<'LOCALFILE_XML'
+    ${file("${path.module}/files/localfile.xml")}
+    LOCALFILE_XML
 
     sed -i '/<ossec_config>/r /tmp/localfile_block.xml' /var/ossec/etc/ossec.conf
 

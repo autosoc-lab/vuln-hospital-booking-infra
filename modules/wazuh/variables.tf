@@ -47,3 +47,8 @@ variable "wazuh_version" {
   description = "설치할 Wazuh major.minor 버전 (app 모듈의 에이전트와 반드시 일치해야 함)"
   type        = string
 }
+
+variable "app_git_ref" {
+  description = "앱 레포(vuln-hospital-booking)의 detection-rules/vuln_hospital_rules.xml을 받아올 브랜치명 - app 모듈이 clone하는 것과 동일한 ref여야 룰이 실제 배포된 코드와 어긋나지 않음"
+  type        = string
+}
