@@ -1,0 +1,5 @@
+# These get embedded verbatim into shell heredocs / uploaded to Wazuh on Linux
+# EC2 instances; CRLF (Windows checkout default) breaks the Wazuh rule parser.
+*.xml text eol=lf
+*.tpl text eol=lf
+*.sh text eol=lf

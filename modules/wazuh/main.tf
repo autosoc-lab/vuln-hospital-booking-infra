@@ -190,6 +190,16 @@ resource "aws_instance" "wazuh" {
     curl -sO https://packages.wazuh.com/${var.wazuh_version}/wazuh-install.sh
     bash wazuh-install.sh -a --ignore-check
 
+    # wazuh-install.sh -a가 opensearch_dashboards.yml의 opensearch.username/password를
+    # 주석 처리된 채로 남겨둬서(기본값 kibanaserver/kibanaserver 사용) 대시보드가 인덱서 인증에
+    # 실패하고 500(Authentication Exception)을 낸다. 설치 스크립트가 생성한 실제 kibanaserver
+    # 비밀번호로 채워 넣어야 한다.
+    KIBANASERVER_PASSWORD=$(tar -O -xf /wazuh-install-files.tar wazuh-install-files/wazuh-passwords.txt \
+      | grep -A1 "kibanaserver'" | grep indexer_password | sed -E "s/.*'(.*)'.*/\1/")
+    sed -i "s/# opensearch.username: kibanaserver/opensearch.username: kibanaserver/" /etc/wazuh-dashboard/opensearch_dashboards.yml
+    sed -i "s/# opensearch.password: kibanaserver/opensearch.password: '$KIBANASERVER_PASSWORD'/" /etc/wazuh-dashboard/opensearch_dashboards.yml
+    systemctl restart wazuh-dashboard
+
     # wodle aws-s3: CloudTrail/VPC Flow Logs/GuardDuty를 S3에서 읽어오도록 설정
     cat > /tmp/wodle_block.xml <<'WODLE_XML'
     ${templatefile("${path.module}/files/wodle_aws_s3.xml.tpl", { log_bucket_name = var.log_bucket_name })}

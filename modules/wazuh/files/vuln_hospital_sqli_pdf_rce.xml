@@ -25,7 +25,7 @@
   <!-- 100301: SQLi 실습에 노출된 공개 검색/다운로드 엔드포인트 요청을 기준 이벤트로 식별한다. -->
   <rule id="100301" level="0">
     <if_sid>100300</if_sid>
-    <field name="url" type="pcre2">^/(?:api/public/clinic-guides/search|api/public/clinic-guides/download|clinic-guides|api/doctors/search|doctors)(?:\?|$)</field>
+    <url type="pcre2">^/(?:api/public/clinic-guides/search|api/public/clinic-guides/download|clinic-guides|api/doctors/search|doctors)(?:\?|$)</url>
     <options>no_log</options>
     <description>Hospital vulnerable public SQL search/download surface</description>
     <group>search_baseline,</group>
@@ -34,7 +34,7 @@
   <!-- 100302: 공개 검색/다운로드 표면에서 'OR 1=1' 형태의 Boolean 기반 SQL Injection 프로빙을 탐지한다. -->
   <rule id="100302" level="10">
     <if_sid>100301</if_sid>
-    <field name="url" type="pcre2">(?i)(?:%27|')(%29|\))?(?:\+|%20|\s)*or(?:\+|%20|\s)+1(?:\+|%20|\s)*(?:%3d|=)(?:\+|%20|\s)*1</field>
+    <url type="pcre2">(?i)(?:%27|')(%29|\))?(?:\+|%20|\s)*or(?:\+|%20|\s)+1(?:\+|%20|\s)*(?:%3d|=)(?:\+|%20|\s)*1</url>
     <description>Boolean-based SQL injection probe against hospital public surface: $(url) from $(srcip)</description>
     <mitre>
       <id>T1190</id>
@@ -45,7 +45,7 @@
   <!-- 100303: ADMIN_ONLY 문서, user_sessions, session_token 등 권한 상승/세션 탈취 대상 키워드가 포함된 SQLi 정찰을 탐지한다. -->
   <rule id="100303" level="13">
     <if_sid>100301</if_sid>
-    <field name="url" type="pcre2">(?i)(?:classification|admin_only|user_sessions|session_token|users\.role|users%2erole)</field>
+    <url type="pcre2">(?i)(?:classification|admin_only|user_sessions|session_token|users\.role|users%2erole)</url>
     <description>SQL injection probe references privileged documents or session tables: $(url) from $(srcip)</description>
     <mitre>
       <id>T1190</id>
@@ -57,7 +57,7 @@
   <!-- 100309: UNION SELECT 구문을 이용한 SQL Injection 데이터 추출 시도를 탐지한다. -->
   <rule id="100309" level="11">
     <if_sid>100301</if_sid>
-    <field name="url" type="pcre2">(?i)(?:%27|')(%29|\))?(?:\+|%20|\s)*union(?:\+|%20|\s)+(?:all(?:\+|%20|\s)+)?select</field>
+    <url type="pcre2">(?i)(?:%27|')(%29|\))?(?:\+|%20|\s)*union(?:\+|%20|\s)+(?:all(?:\+|%20|\s)+)?select</url>
     <description>UNION-based SQL injection probe against hospital public surface: $(url) from $(srcip)</description>
     <mitre>
       <id>T1190</id>
@@ -68,8 +68,8 @@
   <!-- 100312: SQLi 특수문자, 주석, 시스템 카탈로그 키워드 등 일반적인 SQL Injection 의심 입력을 낮은 심각도로 탐지한다. -->
   <rule id="100312" level="8">
     <if_sid>100301</if_sid>
-    <field name="status">^(?:200|400|500)$</field>
-    <field name="url" type="pcre2">(?i)(?:%27|'|%22|"|%2d%2d|--|%23|#|%3b|;|union(?:\+|%20|\s)+select|information_schema|sqlite_master|pg_catalog)</field>
+    <status>^(?:200|400|500)$</status>
+    <url type="pcre2">(?i)(?:%27|'|%22|"|%2d%2d|--|%23|#|%3b|;|union(?:\+|%20|\s)+select|information_schema|sqlite_master|pg_catalog)</url>
     <description>SQL injection keywords or metacharacters observed in hospital public surface: $(url) from $(srcip)</description>
     <mitre>
       <id>T1190</id>
@@ -91,7 +91,7 @@
   <!-- 100304: 의료 문서 및 생성된 PDF 다운로드 요청을 후속 다운로드 탐지의 기준 이벤트로 식별한다. -->
   <rule id="100304" level="0">
     <if_sid>100300</if_sid>
-    <field name="url" type="pcre2">^/(?:api/storage/download/[^/?]+|documents/[^/?]+/download|api/public/clinic-guides/download|clinic-guides/[^/?]+/document|api/pdf/download/[^/?]+|pdfs/[^/?]+/download)(?:\?|$)</field>
+    <url type="pcre2">^/(?:api/storage/download/[^/?]+|documents/[^/?]+/download|api/public/clinic-guides/download|clinic-guides/[^/?]+/document|api/pdf/download/[^/?]+|pdfs/[^/?]+/download)(?:\?|$)</url>
     <options>no_log</options>
     <description>Hospital document or generated PDF download request</description>
     <group>document_download_baseline,</group>
@@ -100,7 +100,7 @@
   <!-- 100305: 권한이 없는 사용자가 보호 문서 다운로드를 시도해 403 응답을 받은 이벤트를 탐지한다. -->
   <rule id="100305" level="10">
     <if_sid>100304</if_sid>
-    <field name="status">^403$</field>
+    <status>^403$</status>
     <description>Forbidden hospital document download attempt: $(url) from $(srcip)</description>
     <mitre>
       <id>T1213</id>
@@ -111,7 +111,7 @@
   <!-- 100306: 의료 문서 또는 생성 PDF 다운로드가 성공한 이벤트를 탐지한다. -->
   <rule id="100306" level="12">
     <if_sid>100304</if_sid>
-    <field name="status">^200$</field>
+    <status>^200$</status>
     <description>Hospital document download succeeded: $(url) from $(srcip)</description>
     <mitre>
       <id>T1005</id>
@@ -120,7 +120,7 @@
   </rule>
 
   <!-- 100307: 권한/세션 대상 SQLi 정찰 이후 같은 출발지에서 문서 다운로드가 성공한 공격 흐름을 탐지한다. -->
-  <rule id="100307" level="15" frequency="1" timeframe="600">
+  <rule id="100307" level="15">
     <if_sid>100306</if_sid>
     <if_matched_sid>100303</if_matched_sid>
     <same_source_ip />
@@ -258,7 +258,7 @@
   </rule>
 
   <!-- 100132: 탈취 의심 의사 세션의 PDF 생성 이후 같은 출발지에서 ReportLab 악용 이벤트가 발생한 RCE 연계 시나리오를 탐지한다. -->
-  <rule id="100132" level="15" frequency="1" timeframe="600">
+  <rule id="100132" level="15">
     <if_sid>100130</if_sid>
     <if_matched_sid>100122</if_matched_sid>
     <same_field>source_ip</same_field>
