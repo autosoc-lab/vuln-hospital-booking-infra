@@ -1,0 +1,349 @@
+<!--
+  Vulnerable Hospital Booking 탐지 룰
+
+  데이터 소스:
+    - /var/log/app/access.log JSON 라인: Flask access_request 이벤트
+    - Flask stdout 커스텀 디코더: app_event/security_event JSON 페이로드
+    - Linux Audit: Wazuh 기본 audit 디코더 및 룰
+    - Suricata eve.json: Wazuh 기본 JSON 디코더
+
+  커스텀 룰 ID는 Wazuh 권장 범위인 100000-120000 안에서 사용한다.
+  배포 전 대표 원본 이벤트를 wazuh-logtest로 검증해야 한다.
+-->
+
+<group name="hospital_app,access_log,stdout,session_hijacking,pdf_rce,hospital_runtime,hospital_network,attack_scenario,">
+
+  <!-- /var/log/app/access.log는 log_format=json으로 수집한다. -->
+  <!-- 100300: Flask access_request JSON 접근 로그를 후속 룰의 기준 이벤트로 식별한다. -->
+  <rule id="100300" level="0">
+    <decoded_as>json</decoded_as>
+    <field name="event">^access_request$</field>
+    <description>Hospital Flask JSON access request</description>
+    <group>web_log,</group>
+  </rule>
+
+  <!-- 100301: SQLi 실습에 노출된 공개 검색/다운로드 엔드포인트 요청을 기준 이벤트로 식별한다. -->
+  <rule id="100301" level="0">
+    <if_sid>100300</if_sid>
+    <field name="url" type="pcre2">^/(?:api/public/clinic-guides/search|api/public/clinic-guides/download|clinic-guides|api/doctors/search|doctors)(?:\?|$)</field>
+    <options>no_log</options>
+    <description>Hospital vulnerable public SQL search/download surface</description>
+    <group>search_baseline,</group>
+  </rule>
+
+  <!-- 100302: 공개 검색/다운로드 표면에서 'OR 1=1' 형태의 Boolean 기반 SQL Injection 프로빙을 탐지한다. -->
+  <rule id="100302" level="10">
+    <if_sid>100301</if_sid>
+    <field name="url" type="pcre2">(?i)(?:%27|')(%29|\))?(?:\+|%20|\s)*or(?:\+|%20|\s)+1(?:\+|%20|\s)*(?:%3d|=)(?:\+|%20|\s)*1</field>
+    <description>Boolean-based SQL injection probe against hospital public surface: $(url) from $(srcip)</description>
+    <mitre>
+      <id>T1190</id>
+    </mitre>
+    <group>sqli,attack_attempt,search,</group>
+  </rule>
+
+  <!-- 100303: ADMIN_ONLY 문서, user_sessions, session_token 등 권한 상승/세션 탈취 대상 키워드가 포함된 SQLi 정찰을 탐지한다. -->
+  <rule id="100303" level="13">
+    <if_sid>100301</if_sid>
+    <field name="url" type="pcre2">(?i)(?:classification|admin_only|user_sessions|session_token|users\.role|users%2erole)</field>
+    <description>SQL injection probe references privileged documents or session tables: $(url) from $(srcip)</description>
+    <mitre>
+      <id>T1190</id>
+      <id>T1539</id>
+    </mitre>
+    <group>sqli,targeted_recon,session_data_access,</group>
+  </rule>
+
+  <!-- 100309: UNION SELECT 구문을 이용한 SQL Injection 데이터 추출 시도를 탐지한다. -->
+  <rule id="100309" level="11">
+    <if_sid>100301</if_sid>
+    <field name="url" type="pcre2">(?i)(?:%27|')(%29|\))?(?:\+|%20|\s)*union(?:\+|%20|\s)+(?:all(?:\+|%20|\s)+)?select</field>
+    <description>UNION-based SQL injection probe against hospital public surface: $(url) from $(srcip)</description>
+    <mitre>
+      <id>T1190</id>
+    </mitre>
+    <group>sqli,attack_attempt,union_sqli,search,</group>
+  </rule>
+
+  <!-- 100312: SQLi 특수문자, 주석, 시스템 카탈로그 키워드 등 일반적인 SQL Injection 의심 입력을 낮은 심각도로 탐지한다. -->
+  <rule id="100312" level="8">
+    <if_sid>100301</if_sid>
+    <field name="status">^(?:200|400|500)$</field>
+    <field name="url" type="pcre2">(?i)(?:%27|'|%22|"|%2d%2d|--|%23|#|%3b|;|union(?:\+|%20|\s)+select|information_schema|sqlite_master|pg_catalog)</field>
+    <description>SQL injection keywords or metacharacters observed in hospital public surface: $(url) from $(srcip)</description>
+    <mitre>
+      <id>T1190</id>
+    </mitre>
+    <group>sqli,attack_attempt,search,</group>
+  </rule>
+
+  <!-- 100313: 동일 출발지에서 Boolean 기반 SQL Injection 프로빙이 짧은 시간에 반복되는 패턴을 상관분석한다. -->
+  <rule id="100313" level="12" frequency="3" timeframe="60">
+    <if_matched_sid>100302</if_matched_sid>
+    <same_source_ip />
+    <description>Repeated Boolean SQL injection probes from the same source: $(srcip)</description>
+    <mitre>
+      <id>T1190</id>
+    </mitre>
+    <group>sqli,correlation,</group>
+  </rule>
+
+  <!-- 100304: 의료 문서 및 생성된 PDF 다운로드 요청을 후속 다운로드 탐지의 기준 이벤트로 식별한다. -->
+  <rule id="100304" level="0">
+    <if_sid>100300</if_sid>
+    <field name="url" type="pcre2">^/(?:api/storage/download/[^/?]+|documents/[^/?]+/download|api/public/clinic-guides/download|clinic-guides/[^/?]+/document|api/pdf/download/[^/?]+|pdfs/[^/?]+/download)(?:\?|$)</field>
+    <options>no_log</options>
+    <description>Hospital document or generated PDF download request</description>
+    <group>document_download_baseline,</group>
+  </rule>
+
+  <!-- 100305: 권한이 없는 사용자가 보호 문서 다운로드를 시도해 403 응답을 받은 이벤트를 탐지한다. -->
+  <rule id="100305" level="10">
+    <if_sid>100304</if_sid>
+    <field name="status">^403$</field>
+    <description>Forbidden hospital document download attempt: $(url) from $(srcip)</description>
+    <mitre>
+      <id>T1213</id>
+    </mitre>
+    <group>document_access,forbidden,attack_attempt,</group>
+  </rule>
+
+  <!-- 100306: 의료 문서 또는 생성 PDF 다운로드가 성공한 이벤트를 탐지한다. -->
+  <rule id="100306" level="12">
+    <if_sid>100304</if_sid>
+    <field name="status">^200$</field>
+    <description>Hospital document download succeeded: $(url) from $(srcip)</description>
+    <mitre>
+      <id>T1005</id>
+    </mitre>
+    <group>document_download,data_access,</group>
+  </rule>
+
+  <!-- 100307: 권한/세션 대상 SQLi 정찰 이후 같은 출발지에서 문서 다운로드가 성공한 공격 흐름을 탐지한다. -->
+  <rule id="100307" level="15" frequency="1" timeframe="600">
+    <if_sid>100306</if_sid>
+    <if_matched_sid>100303</if_matched_sid>
+    <same_source_ip />
+    <description>Likely SQLi-to-document-access chain: privileged/session probing followed by download success from $(srcip)</description>
+    <mitre>
+      <id>T1190</id>
+      <id>T1005</id>
+    </mitre>
+    <group>sqli,kill_chain_suspected,critical,</group>
+  </rule>
+
+  <!-- 100308: 동일 출발지에서 120초 내 서로 다른 문서 5개 이상을 다운로드하는 대량 수집 행위를 탐지한다. -->
+  <rule id="100308" level="12" frequency="5" timeframe="120" ignore="180">
+    <if_matched_sid>100306</if_matched_sid>
+    <same_source_ip />
+    <different_field>document_id</different_field>
+    <description>Bulk hospital document download from $(srcip): at least five different documents in 120 seconds</description>
+    <mitre>
+      <id>T1005</id>
+    </mitre>
+    <group>bulk_download,data_collection,</group>
+  </rule>
+
+  <!-- Flask stdout의 "app_event {json}" 로그는 hospital-app-event 디코더로 처리한다. -->
+  <!-- 100100: Flask stdout의 app_request 이벤트를 후속 세션/SQLi 룰의 기준 이벤트로 식별한다. -->
+  <rule id="100100" level="0">
+    <decoded_as>hospital-app-event</decoded_as>
+    <field name="event">^app_request$</field>
+    <description>Hospital application request event</description>
+  </rule>
+
+  <!-- Flask stdout의 "security_event {json}" 로그는 hospital-security-event 디코더로 처리한다. -->
+  <!-- 100101: Flask stdout의 security_event 이벤트를 후속 PDF 취약점 탐지의 기준 이벤트로 식별한다. -->
+  <rule id="100101" level="0">
+    <decoded_as>hospital-security-event</decoded_as>
+    <field name="event">^security_event$</field>
+    <description>Hospital application security event</description>
+  </rule>
+
+  <!-- 100110: app_request query_string에서 SQL Injection 지표를 탐지한다. -->
+  <rule id="100110" level="9">
+    <if_sid>100100</if_sid>
+    <field name="query_string" type="pcre2">(?i)(?:%27|'|%22|"|%2d%2d|--|%23|#|%3b|;|union(?:\+|%20|\s)+select|or(?:\+|%20|\s)+1(?:\+|%20|\s)*(?:%3d|=)(?:\+|%20|\s)*1|information_schema|sqlite_master|pg_catalog)</field>
+    <description>Hospital request query string contains SQL injection indicators: $(method) $(path)</description>
+    <mitre>
+      <id>T1190</id>
+    </mitre>
+    <group>sql_injection,initial_access,</group>
+  </rule>
+
+  <!-- 100111: UNION 기반 SQLi로 user_sessions/session_token/role_snapshot 등 세션 데이터를 조회하거나 위조하려는 시도를 탐지한다. -->
+  <rule id="100111" level="13">
+    <if_sid>100100</if_sid>
+    <field name="query_string" type="pcre2">(?i)(?=.*union(?:\+|%20|\s)+(?:all(?:\+|%20|\s)+)?select)(?=.*(?:user_sessions|session_token|role_snapshot|users\.role|users%2erole))</field>
+    <description>SQL injection attempts to extract or forge application session data</description>
+    <mitre>
+      <id>T1190</id>
+      <id>T1539</id>
+      <id>T1606.001</id>
+    </mitre>
+    <group>sql_injection,session_data_access,</group>
+  </rule>
+
+  <!-- 100112: 동일 remote_addr에서 SQL Injection 지표가 반복되는 패턴을 상관분석한다. -->
+  <rule id="100112" level="12" frequency="3" timeframe="60">
+    <if_matched_sid>100110</if_matched_sid>
+    <same_field>remote_addr</same_field>
+    <description>Repeated SQL injection attempts from the same source: $(remote_addr)</description>
+    <mitre>
+      <id>T1190</id>
+    </mitre>
+    <group>sql_injection,correlation,</group>
+  </rule>
+
+  <!-- 100120: 인증 세션이 최초 발급 IP와 다른 IP에서 재사용되는 세션 탈취 의심 이벤트를 탐지한다. -->
+  <rule id="100120" level="12">
+    <if_sid>100100</if_sid>
+    <field name="session_id" type="pcre2">^[0-9]+$</field>
+    <field name="session_ip_mismatch">^true$</field>
+    <description>Authenticated session $(session_id) used from a different IP</description>
+    <mitre>
+      <id>T1550.004</id>
+    </mitre>
+    <group>session_hijacking,</group>
+  </rule>
+
+  <!-- 100121: 인증 세션이 최초 User-Agent와 다른 User-Agent에서 재사용되는 세션 탈취 의심 이벤트를 탐지한다. -->
+  <rule id="100121" level="10">
+    <if_sid>100100</if_sid>
+    <field name="session_id" type="pcre2">^[0-9]+$</field>
+    <field name="session_user_agent_mismatch">^true$</field>
+    <description>Authenticated session $(session_id) used with a different User-Agent</description>
+    <mitre>
+      <id>T1550.004</id>
+    </mitre>
+    <group>session_hijacking,</group>
+  </rule>
+
+  <!-- 100122: 탈취 의심 의사 세션이 PDF 생성 엔드포인트를 호출하는 행위를 탐지한다. -->
+  <rule id="100122" level="14">
+    <if_sid>100100</if_sid>
+    <field name="user_role">^DOCTOR$</field>
+    <field name="method">^POST$</field>
+    <field name="path" type="pcre2">^/(?:pdfs/new|api/pdf/render)$</field>
+    <field name="session_ip_mismatch">^true$</field>
+    <description>A doctor session used from a different IP created a clinical PDF</description>
+    <mitre>
+      <id>T1550.004</id>
+    </mitre>
+    <group>session_hijacking,document_generation,</group>
+  </rule>
+
+  <!-- 100130: ReportLab 마크업/색상 표현식 악용으로 PDF 렌더링 취약점 공격을 시도한 이벤트를 탐지한다. -->
+  <rule id="100130" level="14">
+    <if_sid>100101</if_sid>
+    <field name="event_type">^REPORTLAB_MARKUP_PROBE$</field>
+    <description>ReportLab markup/color expression submitted to PDF rendering sink: $(details.field)</description>
+    <mitre>
+      <id>T1190</id>
+      <id>T1059.006</id>
+    </mitre>
+    <group>pdf_rce,reportlab,exploit_attempt,</group>
+  </rule>
+
+  <!-- 100131: 동일 출발지에서 ReportLab PDF 취약점 악용 시도가 반복되는 패턴을 상관분석한다. -->
+  <rule id="100131" level="15" frequency="2" timeframe="120">
+    <if_matched_sid>100130</if_matched_sid>
+    <same_field>source_ip</same_field>
+    <description>Repeated ReportLab PDF exploitation attempts from $(source_ip)</description>
+    <mitre>
+      <id>T1190</id>
+      <id>T1059.006</id>
+    </mitre>
+    <group>pdf_rce,reportlab,correlation,</group>
+  </rule>
+
+  <!-- 100132: 탈취 의심 의사 세션의 PDF 생성 이후 같은 출발지에서 ReportLab 악용 이벤트가 발생한 RCE 연계 시나리오를 탐지한다. -->
+  <rule id="100132" level="15" frequency="1" timeframe="600">
+    <if_sid>100130</if_sid>
+    <if_matched_sid>100122</if_matched_sid>
+    <same_field>source_ip</same_field>
+    <description>Likely stolen doctor session used for ReportLab PDF exploitation from $(source_ip)</description>
+    <mitre>
+      <id>T1550.004</id>
+      <id>T1190</id>
+      <id>T1059.006</id>
+    </mitre>
+    <group>session_hijacking,pdf_rce,critical,</group>
+  </rule>
+
+  <!-- 이 audit 룰은 병원 웹 워크로드 에이전트 이름 또는 그룹으로 적용 범위를 제한한다. -->
+  <!-- 100140: base64 디코딩, pty.spawn, socket/dup2 등 인코딩 명령 또는 리버스 셸 원시 행위를 탐지한다. -->
+  <rule id="100140" level="15">
+    <if_group>audit</if_group>
+    <field name="audit.command" type="pcre2">(?i)(?:base64\s+(?:-d|--decode)|pty\.spawn|socket\.socket|os\.dup2|host\.docker\.internal|collector:9000)</field>
+    <description>Hospital workload executed an encoded command or reverse-shell primitive</description>
+    <mitre>
+      <id>T1059.006</id>
+      <id>T1140</id>
+    </mitre>
+    <group>command_execution,reverse_shell,</group>
+  </rule>
+
+  <!-- 100141: python -c 네트워크 호출, curl/wget/nc/socat 등 웹 워크로드 기준에서 비정상적인 외부 통신 도구 실행을 탐지한다. -->
+  <rule id="100141" level="14">
+    <if_group>audit</if_group>
+    <field name="audit.command" type="pcre2">(?i)(?:python3?\s+-c.*(?:requests\.(?:get|post)|socket\.)|\b(?:curl|wget|nc|ncat|netcat|socat)\b)</field>
+    <description>Hospital workload used a script or raw network utility outside its process allowlist</description>
+    <mitre>
+      <id>T1071.001</id>
+      <id>T1048.003</id>
+    </mitre>
+    <group>command_and_control,exfiltration,</group>
+  </rule>
+
+  <!-- 100142: whoami/id/pwd/hostname/uname, /etc/passwd, /proc/self/environ 조회 등 침해 후 시스템/계정 정보 수집을 탐지한다. -->
+  <rule id="100142" level="13">
+    <if_group>audit</if_group>
+    <field name="audit.command" type="pcre2">(?i)(?:cat\s+/(?:etc/passwd|proc/self/environ)|\b(?:whoami|id|pwd|hostname|uname)\b)</field>
+    <description>Hospital workload performed post-exploitation discovery</description>
+    <mitre>
+      <id>T1033</id>
+      <id>T1082</id>
+      <id>T1552.001</id>
+    </mitre>
+    <group>discovery,credential_access,</group>
+  </rule>
+
+  <!-- 100143: useradd/adduser/passwd/chpasswd 실행 등 로컬 계정 생성 또는 계정 조작 기반 지속성 시도를 탐지한다. -->
+  <rule id="100143" level="15">
+    <if_group>audit</if_group>
+    <field name="audit.command" type="pcre2">(?i)\b(?:useradd|adduser|passwd|chpasswd)\b</field>
+    <description>Hospital workload attempted local account persistence</description>
+    <mitre>
+      <id>T1136.001</id>
+      <id>T1098</id>
+    </mitre>
+    <group>persistence,account_creation,</group>
+  </rule>
+
+  <!-- 100144: 웹 애플리케이션 워크로드에서 tar/gtar 실행을 이용한 자료 압축 및 수집 준비 행위를 탐지한다. -->
+  <rule id="100144" level="14">
+    <if_group>audit</if_group>
+    <field name="audit.exe" type="pcre2">(?i)(?:^|/)(?:tar|gtar)$</field>
+    <description>Web application workload executed an archive utility outside its process allowlist</description>
+    <mitre>
+      <id>T1074.001</id>
+      <id>T1560.001</id>
+    </mitre>
+    <group>collection,staging,</group>
+  </rule>
+
+  <!-- 이 룰은 아웃바운드 전용 Suricata 피드에만 배포하거나 direction 필드를 추가해 사용한다. -->
+  <!-- 100150: DNS/HTTPS/PostgreSQL 기준 포트 외 목적지 포트로 나가는 비정상 아웃바운드 연결을 탐지한다. -->
+  <rule id="100150" level="13">
+    <decoded_as>json</decoded_as>
+    <field name="event_type" type="pcre2">^(?:flow|alert)$</field>
+    <field name="dest_port" type="pcre2" negate="yes">^(?:53|443|5432)$</field>
+    <description>Hospital workload used an outbound destination port outside its network baseline: $(dest_port)</description>
+    <mitre>
+      <id>T1571</id>
+    </mitre>
+    <group>command_and_control,network_connection,</group>
+  </rule>
+
+</group>
