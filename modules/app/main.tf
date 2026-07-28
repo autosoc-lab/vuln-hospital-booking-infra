@@ -77,6 +77,46 @@ resource "aws_iam_role_policy" "documents_s3" {
   })
 }
 
+# Capital One 사고 4단계~5단계 재현용: 탈취한 임시 자격증명으로 공격자가
+# "이 자격증명으로 뭘 할 수 있는지" 정찰하는 단계(자기 role에 붙은 정책 열람)와
+# `aws s3 ls`로 계정 전체 버킷 목록을 열거하는 단계.
+# INTENTIONALLY OVER-PROVISIONED - FOR LAB USE ONLY
+resource "aws_iam_role_policy" "self_inspection" {
+  name = "${var.project_name}-ec2-self-inspection-policy"
+  role = aws_iam_role.ec2_ssm.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        # 자기 role에 붙은 인라인/관리형 정책 목록 및 내용 조회
+        Effect = "Allow"
+        Action = [
+          "iam:GetRole",
+          "iam:ListRolePolicies",
+          "iam:GetRolePolicy",
+          "iam:ListAttachedRolePolicies",
+        ]
+        Resource = aws_iam_role.ec2_ssm.arn
+      },
+      {
+        # ListAttachedRolePolicies로 찾은 관리형 정책(AmazonSSMManagedInstanceCore)의
+        # 실제 내용까지 확인하려면 정책 리소스 자체에 대한 권한이 별도로 필요함
+        Effect   = "Allow"
+        Action   = ["iam:GetPolicy", "iam:GetPolicyVersion"]
+        Resource = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+      },
+      {
+        # `aws s3 ls` (버킷 지정 없이) 로 계정 전체 버킷 목록 열거 - 특정 버킷 리소스로
+        # 범위를 좁힐 수 없는 계정 단위 API라 Resource="*" 가 불가피함
+        Effect   = "Allow"
+        Action   = ["s3:ListAllMyBuckets"]
+        Resource = "*"
+      }
+    ]
+  })
+}
+
 resource "aws_iam_instance_profile" "ec2_ssm" {
   name = "${var.project_name}-ec2-ssm-profile"
   role = aws_iam_role.ec2_ssm.name
