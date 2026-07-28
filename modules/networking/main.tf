@@ -94,11 +94,11 @@ resource "aws_security_group" "ec2" {
   vpc_id      = aws_vpc.main.id
 
   ingress {
-    description = "SSH - restricted to lab operator's current public IP"
+    description = "SSH - INTENTIONALLY OPEN TO INTERNET FOR LAB USE ONLY"
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
-    cidr_blocks = ["59.10.5.5/32"]
+    cidr_blocks = ["0.0.0.0/0"]
   }
 
   ingress {
