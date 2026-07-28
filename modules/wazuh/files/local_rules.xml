@@ -2,7 +2,7 @@
 
   <!-- SSRF: 앱 요청 로그의 url 파라미터가 내부망/클라우드 메타데이터 주소를 가리킴 -->
   <rule id="100010" level="0">
-    <decoded_as>json</decoded_as>
+    <decoded_as>hospital-app-event</decoded_as>
     <field name="event">app_request</field>
     <description>vuln-hospital-booking application request log</description>
   </rule>
