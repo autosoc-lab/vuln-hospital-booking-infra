@@ -2,8 +2,13 @@
   Vulnerable Hospital Booking 탐지 룰
 
   데이터 소스:
-    - /var/log/app/access.log JSON 라인: Flask access_request 이벤트
+    - /var/log/app/access.log: Apache Combined Log 포맷. Wazuh 기본 web-accesslog
+      디코더 + 기본 룰셋(SQLi/XSS/traversal 등 일반 시그니처)이 처리하므로
+      이 파일 전용 커스텀 룰은 없다.
     - Flask stdout 커스텀 디코더: app_event/security_event JSON 페이로드
+      (이 앱 고유의 비즈니스 로직 위반 — 세션 하이재킹, PDF RCE 마크업 프로브,
+      SQLi 엔드포인트 사용/에러 태깅, 문서 다운로드 상관분석 — 은 기본 룰셋이
+      알 수 없는 애플리케이션 컨텍스트라 여기서만 탐지 가능)
     - Linux Audit: Wazuh 기본 audit 디코더 및 룰
     - Suricata eve.json: Wazuh 기본 JSON 디코더
 
@@ -11,138 +16,7 @@
   배포 전 대표 원본 이벤트를 wazuh-logtest로 검증해야 한다.
 -->
 
-<group name="hospital_app,access_log,stdout,session_hijacking,pdf_rce,hospital_runtime,hospital_network,attack_scenario,">
-
-  <!-- /var/log/app/access.log는 log_format=json으로 수집한다. -->
-  <!-- 100300: Flask access_request JSON 접근 로그를 후속 룰의 기준 이벤트로 식별한다. -->
-  <rule id="100300" level="0">
-    <decoded_as>json</decoded_as>
-    <field name="event">^access_request$</field>
-    <description>Hospital Flask JSON access request</description>
-    <group>web_log,</group>
-  </rule>
-
-  <!-- 100301: SQLi 실습에 노출된 공개 검색/다운로드 엔드포인트 요청을 기준 이벤트로 식별한다. -->
-  <rule id="100301" level="0">
-    <if_sid>100300</if_sid>
-    <url type="pcre2">^/(?:api/public/clinic-guides/search|api/public/clinic-guides/download|clinic-guides|api/doctors/search|doctors)(?:\?|$)</url>
-    <options>no_log</options>
-    <description>Hospital vulnerable public SQL search/download surface</description>
-    <group>search_baseline,</group>
-  </rule>
-
-  <!-- 100302: 공개 검색/다운로드 표면에서 'OR 1=1' 형태의 Boolean 기반 SQL Injection 프로빙을 탐지한다. -->
-  <rule id="100302" level="10">
-    <if_sid>100301</if_sid>
-    <url type="pcre2">(?i)(?:%27|')(%29|\))?(?:\+|%20|\s)*or(?:\+|%20|\s)+1(?:\+|%20|\s)*(?:%3d|=)(?:\+|%20|\s)*1</url>
-    <description>Boolean-based SQL injection probe against hospital public surface: $(url) from $(srcip)</description>
-    <mitre>
-      <id>T1190</id>
-    </mitre>
-    <group>sqli,attack_attempt,search,</group>
-  </rule>
-
-  <!-- 100303: ADMIN_ONLY 문서, user_sessions, session_token 등 권한 상승/세션 탈취 대상 키워드가 포함된 SQLi 정찰을 탐지한다. -->
-  <rule id="100303" level="13">
-    <if_sid>100301</if_sid>
-    <url type="pcre2">(?i)(?:classification|admin_only|user_sessions|session_token|users\.role|users%2erole)</url>
-    <description>SQL injection probe references privileged documents or session tables: $(url) from $(srcip)</description>
-    <mitre>
-      <id>T1190</id>
-      <id>T1539</id>
-    </mitre>
-    <group>sqli,targeted_recon,session_data_access,</group>
-  </rule>
-
-  <!-- 100309: UNION SELECT 구문을 이용한 SQL Injection 데이터 추출 시도를 탐지한다. -->
-  <rule id="100309" level="11">
-    <if_sid>100301</if_sid>
-    <url type="pcre2">(?i)(?:%27|')(%29|\))?(?:\+|%20|\s)*union(?:\+|%20|\s)+(?:all(?:\+|%20|\s)+)?select</url>
-    <description>UNION-based SQL injection probe against hospital public surface: $(url) from $(srcip)</description>
-    <mitre>
-      <id>T1190</id>
-    </mitre>
-    <group>sqli,attack_attempt,union_sqli,search,</group>
-  </rule>
-
-  <!-- 100312: SQLi 특수문자, 주석, 시스템 카탈로그 키워드 등 일반적인 SQL Injection 의심 입력을 낮은 심각도로 탐지한다. -->
-  <rule id="100312" level="8">
-    <if_sid>100301</if_sid>
-    <status>^(?:200|400|500)$</status>
-    <url type="pcre2">(?i)(?:%27|'|%22|"|%2d%2d|--|%23|#|%3b|;|union(?:\+|%20|\s)+select|information_schema|sqlite_master|pg_catalog)</url>
-    <description>SQL injection keywords or metacharacters observed in hospital public surface: $(url) from $(srcip)</description>
-    <mitre>
-      <id>T1190</id>
-    </mitre>
-    <group>sqli,attack_attempt,search,</group>
-  </rule>
-
-  <!-- 100313: 동일 출발지에서 Boolean 기반 SQL Injection 프로빙이 짧은 시간에 반복되는 패턴을 상관분석한다. -->
-  <rule id="100313" level="12" frequency="3" timeframe="60">
-    <if_matched_sid>100302</if_matched_sid>
-    <same_source_ip />
-    <description>Repeated Boolean SQL injection probes from the same source: $(srcip)</description>
-    <mitre>
-      <id>T1190</id>
-    </mitre>
-    <group>sqli,correlation,</group>
-  </rule>
-
-  <!-- 100304: 의료 문서 및 생성된 PDF 다운로드 요청을 후속 다운로드 탐지의 기준 이벤트로 식별한다. -->
-  <rule id="100304" level="0">
-    <if_sid>100300</if_sid>
-    <url type="pcre2">^/(?:api/storage/download/[^/?]+|documents/[^/?]+/download|api/public/clinic-guides/download|clinic-guides/[^/?]+/document|api/pdf/download/[^/?]+|pdfs/[^/?]+/download)(?:\?|$)</url>
-    <options>no_log</options>
-    <description>Hospital document or generated PDF download request</description>
-    <group>document_download_baseline,</group>
-  </rule>
-
-  <!-- 100305: 권한이 없는 사용자가 보호 문서 다운로드를 시도해 403 응답을 받은 이벤트를 탐지한다. -->
-  <rule id="100305" level="10">
-    <if_sid>100304</if_sid>
-    <status>^403$</status>
-    <description>Forbidden hospital document download attempt: $(url) from $(srcip)</description>
-    <mitre>
-      <id>T1213</id>
-    </mitre>
-    <group>document_access,forbidden,attack_attempt,</group>
-  </rule>
-
-  <!-- 100306: 의료 문서 또는 생성 PDF 다운로드가 성공한 이벤트를 탐지한다. -->
-  <rule id="100306" level="12">
-    <if_sid>100304</if_sid>
-    <status>^200$</status>
-    <description>Hospital document download succeeded: $(url) from $(srcip)</description>
-    <mitre>
-      <id>T1005</id>
-    </mitre>
-    <group>document_download,data_access,</group>
-  </rule>
-
-  <!-- 100307: 권한/세션 대상 SQLi 정찰 이후 같은 출발지에서 문서 다운로드가 성공한 공격 흐름을 탐지한다. -->
-  <rule id="100307" level="15">
-    <if_sid>100306</if_sid>
-    <if_matched_sid>100303</if_matched_sid>
-    <same_source_ip />
-    <description>Likely SQLi-to-document-access chain: privileged/session probing followed by download success from $(srcip)</description>
-    <mitre>
-      <id>T1190</id>
-      <id>T1005</id>
-    </mitre>
-    <group>sqli,kill_chain_suspected,critical,</group>
-  </rule>
-
-  <!-- 100308: 동일 출발지에서 120초 내 서로 다른 문서 5개 이상을 다운로드하는 대량 수집 행위를 탐지한다. -->
-  <rule id="100308" level="12" frequency="5" timeframe="120" ignore="180">
-    <if_matched_sid>100306</if_matched_sid>
-    <same_source_ip />
-    <different_field>document_id</different_field>
-    <description>Bulk hospital document download from $(srcip): at least five different documents in 120 seconds</description>
-    <mitre>
-      <id>T1005</id>
-    </mitre>
-    <group>bulk_download,data_collection,</group>
-  </rule>
+<group name="hospital_app,stdout,session_hijacking,pdf_rce,hospital_runtime,hospital_network,attack_scenario,">
 
   <!-- Flask stdout의 "app_event {json}" 로그는 hospital-app-event 디코더로 처리한다. -->
   <!-- 100100: Flask stdout의 app_request 이벤트를 후속 세션/SQLi 룰의 기준 이벤트로 식별한다. -->
@@ -193,6 +67,39 @@
       <id>T1190</id>
     </mitre>
     <group>sql_injection,correlation,</group>
+  </rule>
+
+  <!-- 100113: 의료 문서 다운로드가 발생한 security_event를 후속 킬체인 상관분석의 기준 이벤트로 식별한다. -->
+  <rule id="100113" level="0">
+    <if_sid>100101</if_sid>
+    <field name="event_type">^DOCUMENT_DOWNLOAD$</field>
+    <options>no_log</options>
+    <description>Hospital document download event</description>
+    <group>document_download_baseline,</group>
+  </rule>
+
+  <!-- 100114: 앱이 자체적으로(세션당 다운로드 카운트) 임계치를 넘었다고 판단해 남긴 대량 다운로드 이벤트를 그대로 알림으로 전달한다. -->
+  <rule id="100114" level="12">
+    <if_sid>100101</if_sid>
+    <field name="event_type">^BULK_DOCUMENT_DOWNLOAD$</field>
+    <description>Bulk hospital document download detected by application (session revoked): $(source_ip)</description>
+    <mitre>
+      <id>T1005</id>
+    </mitre>
+    <group>bulk_download,data_collection,</group>
+  </rule>
+
+  <!-- 100115: SQL Injection 지표(100110) 관측 이후 같은 출발지에서 문서 다운로드가 발생한 공격 흐름을 탐지한다. -->
+  <rule id="100115" level="15">
+    <if_sid>100113</if_sid>
+    <if_matched_sid>100110</if_matched_sid>
+    <same_field>source_ip</same_field>
+    <description>Likely SQLi-to-document-access chain: injection indicator followed by document download from $(source_ip)</description>
+    <mitre>
+      <id>T1190</id>
+      <id>T1005</id>
+    </mitre>
+    <group>sqli,kill_chain_suspected,critical,</group>
   </rule>
 
   <!-- 100120: 인증 세션이 최초 발급 IP와 다른 IP에서 재사용되는 세션 탈취 의심 이벤트를 탐지한다. -->

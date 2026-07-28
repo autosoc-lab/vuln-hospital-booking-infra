@@ -102,15 +102,10 @@ resource "aws_s3_bucket_public_access_block" "documents" {
   restrict_public_buckets = true
 }
 
-resource "aws_s3_bucket_server_side_encryption_configuration" "documents" {
-  bucket = aws_s3_bucket.documents.id
-
-  rule {
-    apply_server_side_encryption_by_default {
-      sse_algorithm = "AES256"
-    }
-  }
-}
+# 기본 SSE-S3 암호화를 걸어두면 AWS가 2026-04부터 "SSE-C 이력 없는 버킷"에
+# SSE-C 업로드를 차단하는 정책(BlockedEncryptionTypes) 때문에 SSE-C 랜섬웨어
+# 시나리오(Codefinger 체인, SSE-C.md 참고)가 끝까지 재현되지 않는다.
+# 랩 목적상 기본 암호화를 걸지 않고 버킷을 비워둔다.
 
 # 버저닝은 켜져 있지만 MFA Delete가 없어 SSE-C 랜섬웨어 시나리오에서
 # 라이프사이클 정책으로 이전 버전까지 삭제되는 것을 막지 못함 (SSE-C.md 3.4 참고)
