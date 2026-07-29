@@ -11,12 +11,13 @@
       알 수 없는 애플리케이션 컨텍스트라 여기서만 탐지 가능)
     - Linux Audit: Wazuh 기본 audit 디코더 및 룰
     - Suricata eve.json: Wazuh 기본 JSON 디코더
+    - Docker JSON 로그: WAF/ModSecurity stdout 및 stderr
 
   커스텀 룰 ID는 Wazuh 권장 범위인 100000-120000 안에서 사용한다.
   배포 전 대표 원본 이벤트를 wazuh-logtest로 검증해야 한다.
 -->
 
-<group name="hospital_app,stdout,session_hijacking,pdf_rce,hospital_runtime,hospital_network,attack_scenario,">
+<group name="hospital_app,stdout,session_hijacking,pdf_rce,hospital_runtime,hospital_network,waf,modsecurity,attack_scenario,">
 
   <!-- Flask stdout의 "app_event {json}" 로그는 hospital-app-event 디코더로 처리한다. -->
   <!-- 100100: Flask stdout의 app_request 이벤트를 후속 세션/SQLi 룰의 기준 이벤트로 식별한다. -->
@@ -251,6 +252,36 @@
       <id>T1571</id>
     </mitre>
     <group>command_and_control,network_connection,</group>
+  </rule>
+
+  <!-- Docker JSON 로그의 log 필드에 들어온 WAF/ModSecurity 이벤트를 기준 이벤트로 식별한다. -->
+  <rule id="100160" level="3">
+    <decoded_as>json</decoded_as>
+    <field name="log" type="pcre2">(?i)(?:ModSecurity:|OWASP_CRS|\"producer\":\{\"modsecurity\")</field>
+    <description>Hospital WAF/ModSecurity event observed from Docker logs</description>
+    <group>waf,modsecurity,docker,</group>
+  </rule>
+
+  <!-- WAF가 요청을 실제로 차단한 경우를 알림으로 올린다. -->
+  <rule id="100161" level="10">
+    <if_sid>100160</if_sid>
+    <field name="log" type="pcre2">(?i)(?:Access denied with code 403|\"is_interrupted\":true|\"http_code\":403)</field>
+    <description>Hospital WAF blocked an HTTP request</description>
+    <mitre>
+      <id>T1190</id>
+    </mitre>
+    <group>waf,modsecurity,blocked_request,</group>
+  </rule>
+
+  <!-- CRS/libinjection이 SQL Injection으로 판정해 WAF가 차단한 요청을 고위험 알림으로 올린다. -->
+  <rule id="100162" level="13">
+    <if_sid>100161</if_sid>
+    <field name="log" type="pcre2">(?i)(?:SQL Injection Attack Detected|attack-sqli|REQUEST-942|libinjection|/api/doctors/search.*(?:%27|'|OR%201%3D1|1=1))</field>
+    <description>Hospital WAF blocked a SQL injection attempt</description>
+    <mitre>
+      <id>T1190</id>
+    </mitre>
+    <group>waf,modsecurity,sql_injection,blocked_request,</group>
   </rule>
 
 </group>

@@ -241,7 +241,10 @@ resource "aws_instance" "app" {
     # 앱 요청 로그를 순수 JSON 파일로 남겨서(볼륨 마운트된 ./logs) Wazuh 에이전트가 읽어갈 수 있게 함
     sed -i '/DATABASE_URL:/a\      APP_LOG_FILE: "/var/log/app/app.log"' docker-compose.yml
 
-    docker compose up -d --no-deps web
+    # 운영 배포는 WAF/prod override를 반드시 포함한다. RDS를 사용하므로 compose의 db 서비스는 기동하지 않는다.
+    COMPOSE_FILES="-f docker-compose.yml -f docker-compose.waf.yml -f docker-compose.prod.yml"
+    COMPOSE_SERVICES="web waf"
+    docker compose $COMPOSE_FILES up -d --build --no-deps $COMPOSE_SERVICES
 
     # RDS 연결이 가능해질 때까지 대기 (최대 5분)
     for i in $(seq 1 30); do
@@ -252,11 +255,11 @@ resource "aws_instance" "app" {
     done
 
     # 스키마 생성 및 실습 데이터 시드
-    docker compose exec -T web flask --app run init-db
-    docker compose exec -T web flask --app run seed-db
+    docker compose $COMPOSE_FILES exec -T web flask --app run init-db
+    docker compose $COMPOSE_FILES exec -T web flask --app run seed-db
 
     # 시드된 문서 원본 파일을 S3로 마이그레이션 (SSE-C 실습 대상)
-    docker compose exec -T web flask --app run migrate-storage-to-s3
+    docker compose $COMPOSE_FILES exec -T web flask --app run migrate-storage-to-s3
 
     # Wazuh 매니저의 에이전트 등록 포트(1515)가 열릴 때까지 대기 (all-in-one 설치는 수 분~10분 이상 소요, 최대 20분 대기)
     for i in $(seq 1 120); do
@@ -288,7 +291,9 @@ resource "aws_instance" "app" {
     ${file("${path.module}/files/localfile.xml")}
     LOCALFILE_XML
 
-    sed -i '/<ossec_config>/r /tmp/localfile_block.xml' /var/ossec/etc/ossec.conf
+    if ! grep -q '/opt/app/logs/app.log' /var/ossec/etc/ossec.conf; then
+      sed -i '/<ossec_config>/r /tmp/localfile_block.xml' /var/ossec/etc/ossec.conf
+    fi
 
     systemctl daemon-reload
     systemctl enable wazuh-agent

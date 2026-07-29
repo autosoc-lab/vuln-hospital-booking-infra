@@ -87,7 +87,7 @@ resource "aws_flow_log" "vpc_s3" {
 
 # --- 보안그룹: EC2용 (의도적으로 느슨하게) ---
 # INTENTIONALLY PERMISSIVE - FOR LAB USE ONLY
-# 0.0.0.0/0 에서 SSH(22) 포함 다중 포트 인바운드 허용 — SIEM/SOAR 탐지 실습을 위한 의도적 취약 설정
+# 0.0.0.0/0 에서 SSH(22) 인바운드 허용 — SIEM/SOAR 탐지 실습을 위한 의도적 취약 설정
 resource "aws_security_group" "ec2" {
   name        = "${var.project_name}-ec2-sg"
   description = "INTENTIONALLY PERMISSIVE - FOR LAB USE ONLY"
@@ -113,22 +113,6 @@ resource "aws_security_group" "ec2" {
     description = "HTTPS"
     from_port   = 443
     to_port     = 443
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  ingress {
-    description = "App port 5000"
-    from_port   = 5000
-    to_port     = 5000
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  ingress {
-    description = "App port 5001"
-    from_port   = 5001
-    to_port     = 5001
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
