@@ -51,10 +51,13 @@
     <group>s3_ransomware,</group>
   </rule>
 
-  <!-- 라이프사이클 정책 변경으로 자동삭제 설정 (복구 불능화) -->
+  <!-- 라이프사이클 정책 변경으로 자동삭제 설정 (복구 불능화).
+       boto3 메서드명은 put_bucket_lifecycle_configuration이지만 CloudTrail
+       eventName은 구버전 REST API 명칭인 PutBucketLifecycle로 기록된다
+       (lookup_events로 실제 호출 후 확인함). -->
   <rule id="100031" level="10">
     <if_sid>80200</if_sid>
-    <field name="aws.eventName">^PutBucketLifecycleConfiguration$</field>
+    <field name="aws.eventName">^PutBucketLifecycle$</field>
     <field name="aws.requestParameters.bucketName" type="pcre2">-documents-</field>
     <description>Document bucket lifecycle policy changed - possible SSE-C ransomware auto-delete stage</description>
     <mitre>
