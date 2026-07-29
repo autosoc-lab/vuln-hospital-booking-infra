@@ -23,6 +23,10 @@ resource "aws_key_pair" "app" {
   key_name   = var.key_pair_name
   public_key = file("${path.root}/ssh/vuln-hospital-lab.pub")
 
+  lifecycle {
+    ignore_changes = [public_key]
+  }
+
   tags = local.common_tags
 }
 
