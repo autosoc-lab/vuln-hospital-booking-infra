@@ -43,7 +43,19 @@ module "wazuh" {
   wazuh_version         = var.wazuh_version
 }
 
-# 4. 애플리케이션 계층 — EC2, RDS, Elastic IP
+# 4. C2/수집 서버 — 공격자 소유로 가정하는 독립 EC2 (RCE/SSRF 실습에서 탈취 데이터를 받는 쪽)
+module "c2" {
+  source = "./modules/c2"
+
+  project_name     = var.project_name
+  common_tags      = local.common_tags
+  public_subnet_id = module.networking.public_subnet_id
+  key_pair_name    = aws_key_pair.app.key_name
+  c2_git_ref       = var.c2_git_ref
+  c2_lab_token     = var.c2_lab_token
+}
+
+# 5. 애플리케이션 계층 — EC2, RDS, Elastic IP
 module "app" {
   source = "./modules/app"
 

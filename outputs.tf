@@ -39,6 +39,11 @@ output "vpc_id" {
   value       = module.networking.vpc_id
 }
 
+output "c2_public_ip" {
+  description = "C2/수집 서버 퍼블릭 IP (vuln-hospital-booking-c2, 8080 포트)"
+  value       = module.c2.public_ip
+}
+
 output "wazuh_dashboard_url" {
   description = "Wazuh 대시보드 URL (초기 로그인 정보는 SSH 접속 후 wazuh-install-files.tar 참고)"
   value       = "https://${module.wazuh.manager_public_ip}"

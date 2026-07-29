@@ -53,6 +53,20 @@ variable "enable_guardduty" {
   default     = true
 }
 
+# C2/수집 서버(vuln-hospital-booking-c2)가 clone할 브랜치
+variable "c2_git_ref" {
+  description = "EC2 user_data가 clone할 vuln-hospital-booking-c2 브랜치명"
+  type        = string
+  default     = "main"
+}
+
+# C2 수집 서버 /upload 엔드포인트 인증 토큰
+variable "c2_lab_token" {
+  description = "vuln-hospital-booking-c2의 X-Lab-Token 인증값"
+  type        = string
+  sensitive   = true
+}
+
 # 현재 호출자의 AWS 계정 ID — S3 버킷명 등에 사용
 data "aws_caller_identity" "current" {}
 
