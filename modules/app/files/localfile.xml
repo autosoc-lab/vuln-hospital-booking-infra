@@ -6,3 +6,7 @@
     <log_format>syslog</log_format>
     <location>/opt/app/logs/access.log</location>
   </localfile>
+  <localfile>
+    <log_format>json</log_format>
+    <location>/var/lib/docker/containers/*/*-json.log</location>
+  </localfile>

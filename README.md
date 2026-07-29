@@ -41,5 +41,37 @@ terraform destroy
 
 ## 앱 배포 동작
 
-- EC2 user_data가 `var.app_git_ref`(기본값 `lab/sqli-ec2-rds`, SQLi 실습 코드 병합 브랜치)를 clone하고, `docker-compose.yml`의 `DATABASE_URL`을 RDS 엔드포인트로 교체한 뒤 `web` 컨테이너만 기동합니다(로컬 db 컨테이너는 사용하지 않음).
+- EC2 user_data가 `var.app_git_ref`(기본값 `lab/sqli-ec2-rds`, SQLi 실습 코드 병합 브랜치)를 clone하고, `docker-compose.yml`의 `DATABASE_URL`을 RDS 엔드포인트로 교체합니다.
+- 운영 배포는 WAF/prod override를 포함해 실행합니다. RDS를 사용하므로 Compose의 `db` 서비스는 기동하지 않고 `web`, `waf`만 대상으로 올립니다.
+
+```bash
+docker compose \
+  -f docker-compose.yml \
+  -f docker-compose.waf.yml \
+  -f docker-compose.prod.yml \
+  up -d --build --no-deps web waf
+```
+
 - RDS가 연결 가능해질 때까지 최대 5분 대기한 뒤 `flask init-db`/`seed-db`를 자동 실행하므로, `terraform apply` 완료 후 EC2 퍼블릭 IP로 바로 접속해 실습 계정으로 로그인할 수 있습니다(부팅+시드까지 수 분 소요).
+
+## 운영 재배포 및 검증
+
+기존 EC2에서 수동 재배포가 필요하면 `/opt/app`에서 아래처럼 실행합니다.
+
+```bash
+docker compose down
+docker compose -f docker-compose.yml -f docker-compose.waf.yml -f docker-compose.prod.yml up -d --build --no-deps web waf
+docker compose -f docker-compose.yml -f docker-compose.waf.yml -f docker-compose.prod.yml exec web flask --app run init-db
+docker compose -f docker-compose.yml -f docker-compose.waf.yml -f docker-compose.prod.yml exec web flask --app run seed-db
+```
+
+WAF 동작과 직접 포트 차단은 아래 요청으로 확인합니다.
+
+```bash
+curl -I http://<EC2_PUBLIC_IP>/
+curl -i "http://<EC2_PUBLIC_IP>/api/doctors/search?q=%27%20OR%201%3D1--"
+curl -I --connect-timeout 3 http://<EC2_PUBLIC_IP>:5001/
+nc -vz -w 3 <EC2_PUBLIC_IP> 5433
+```
+
+SQLi 요청은 `403 Forbidden`과 `X-Request-ID`가 포함된 커스텀 차단 페이지가 기대값입니다.
