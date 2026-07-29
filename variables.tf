@@ -22,7 +22,7 @@ variable "key_pair_name" {
 variable "app_git_ref" {
   description = "EC2 user_data가 clone할 vuln-hospital-booking 브랜치명"
   type        = string
-  default     = "feature/add-modsecurity-waf"
+  default     = "main"
 }
 
 # RDS PostgreSQL 관리자 계정

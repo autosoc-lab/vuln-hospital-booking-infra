@@ -41,7 +41,7 @@ terraform destroy
 
 ## 앱 배포 동작
 
-- EC2 user_data가 `var.app_git_ref`(기본값 `lab/sqli-ec2-rds`, SQLi 실습 코드 병합 브랜치)를 clone하고, `docker-compose.yml`의 `DATABASE_URL`을 RDS 엔드포인트로 교체합니다.
+- EC2 user_data가 `var.app_git_ref`(기본값 `main`, SQLi 실습 코드 + WAF/ModSecurity가 병합된 브랜치)를 clone하고, `docker-compose.yml`의 `DATABASE_URL`을 RDS 엔드포인트로 교체합니다.
 - 운영 배포는 WAF/prod override를 포함해 실행합니다. RDS를 사용하므로 Compose의 `db` 서비스는 기동하지 않고 `web`, `waf`만 대상으로 올립니다.
 
 ```bash
