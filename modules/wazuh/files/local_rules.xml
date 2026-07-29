@@ -18,8 +18,11 @@
   </rule>
 
   <!-- S3 대량 다운로드(sync)를 통한 외부 유출 -->
+  <!-- Wazuh 기본 룰 80200(decoded_as json + integration=aws)의 자식으로 체이닝해야 한다.
+       decoded_as만으로 독립된 top-level 룰을 만들면 80200이 먼저 매칭을 가져가버려서
+       이 룰은 절대 평가되지 않는다(같은 로그당 하나의 룰 트리만 따라감). -->
   <rule id="100020" level="3">
-    <decoded_as>json</decoded_as>
+    <if_sid>80200</if_sid>
     <field name="aws.eventName">^GetObject$</field>
     <field name="aws.requestParameters.bucketName" type="pcre2">-documents-</field>
     <description>Document bucket object download (GetObject)</description>
@@ -38,7 +41,7 @@
 
   <!-- SSE-C 커스텀 키 재암호화 (Codefinger 랜섬웨어 패턴) -->
   <rule id="100030" level="12">
-    <decoded_as>json</decoded_as>
+    <if_sid>80200</if_sid>
     <field name="aws.eventName">^PutObject$</field>
     <field name="aws.requestParameters.x-amz-server-side-encryption-customer-algorithm" type="pcre2">.+</field>
     <description>S3 object re-encrypted with SSE-C customer key - Codefinger ransomware pattern</description>
@@ -50,7 +53,7 @@
 
   <!-- 라이프사이클 정책 변경으로 자동삭제 설정 (복구 불능화) -->
   <rule id="100031" level="10">
-    <decoded_as>json</decoded_as>
+    <if_sid>80200</if_sid>
     <field name="aws.eventName">^PutBucketLifecycleConfiguration$</field>
     <field name="aws.requestParameters.bucketName" type="pcre2">-documents-</field>
     <description>Document bucket lifecycle policy changed - possible SSE-C ransomware auto-delete stage</description>
@@ -66,7 +69,7 @@
   <!-- ============================================================ -->
 
   <rule id="100040" level="12">
-    <decoded_as>json</decoded_as>
+    <if_sid>80200</if_sid>
     <field name="aws.eventName">^StopLogging$</field>
     <description>CloudTrail logging stopped - defense evasion suspected</description>
     <mitre>
@@ -76,7 +79,7 @@
   </rule>
 
   <rule id="100041" level="12">
-    <decoded_as>json</decoded_as>
+    <if_sid>80200</if_sid>
     <field name="aws.eventName">^DeleteTrail$</field>
     <description>CloudTrail trail deleted - defense evasion suspected</description>
     <mitre>
@@ -86,7 +89,7 @@
   </rule>
 
   <rule id="100042" level="9">
-    <decoded_as>json</decoded_as>
+    <if_sid>80200</if_sid>
     <field name="aws.eventName">^UpdateTrail$</field>
     <description>CloudTrail trail configuration changed - verify multi-region/log validation settings were not weakened</description>
     <mitre>
@@ -96,7 +99,7 @@
   </rule>
 
   <rule id="100043" level="12">
-    <decoded_as>json</decoded_as>
+    <if_sid>80200</if_sid>
     <field name="aws.eventName">^DeleteFlowLogs$</field>
     <description>VPC Flow Logs deleted - defense evasion suspected</description>
     <mitre>
@@ -106,7 +109,7 @@
   </rule>
 
   <rule id="100044" level="12">
-    <decoded_as>json</decoded_as>
+    <if_sid>80200</if_sid>
     <field name="aws.eventName">^DeleteBucket$</field>
     <field name="aws.requestParameters.bucketName" type="pcre2">-logs-</field>
     <description>Log bucket deleted - CloudTrail/VPC Flow Log/GuardDuty evidence destruction suspected</description>
@@ -117,7 +120,7 @@
   </rule>
 
   <rule id="100045" level="10">
-    <decoded_as>json</decoded_as>
+    <if_sid>80200</if_sid>
     <field name="aws.eventName" type="pcre2">^(PutBucketPolicy|PutBucketAcl|DeletePublicAccessBlock)$</field>
     <field name="aws.requestParameters.bucketName" type="pcre2">-logs-</field>
     <description>Log bucket policy/ACL changed - possible attempt to expose or lock out access to log evidence</description>
@@ -131,9 +134,11 @@
   <!-- VPC Flow Logs 기반 네트워크 이상탐지                            -->
   <!-- ============================================================ -->
 
-  <!-- VPC Flow Log 레코드 식별용 베이스 룰 -->
+  <!-- VPC Flow Log 레코드 식별용 베이스 룰. Wazuh 기본 룰셋의 vpcflow 전용 베이스(80400,
+       aws.source=vpcflow)에 체이닝한다 - 80200에 직접 걸면 Wazuh 자체 vpcflow 룰(80400
+       트리)이 먼저 그 이벤트를 가져가버려서 이 룰까지 평가가 내려오지 않는다. -->
   <rule id="100050" level="0">
-    <decoded_as>json</decoded_as>
+    <if_sid>80400</if_sid>
     <field name="aws.action" type="pcre2">^(ACCEPT|REJECT)$</field>
     <description>AWS VPC Flow Log record</description>
     <group>vpcflow,</group>
