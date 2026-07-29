@@ -170,10 +170,6 @@ resource "aws_instance" "wazuh" {
   # S3에 룰/디코더 파일이 먼저 올라가 있어야 user_data의 aws s3 cp가 성공한다
   depends_on = [aws_s3_object.hospital_rules, aws_s3_object.hospital_decoders]
 
-  lifecycle {
-    ignore_changes = [user_data]
-  }
-
   # 기본 8GB로는 indexer(850MB+)/manager/filebeat/dashboard 설치 중 디스크가 꽉 참
   root_block_device {
     volume_size = 50
