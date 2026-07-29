@@ -291,7 +291,9 @@ resource "aws_instance" "app" {
     ${file("${path.module}/files/localfile.xml")}
     LOCALFILE_XML
 
-    sed -i '/<ossec_config>/r /tmp/localfile_block.xml' /var/ossec/etc/ossec.conf
+    if ! grep -q '/opt/app/logs/app.log' /var/ossec/etc/ossec.conf; then
+      sed -i '/<ossec_config>/r /tmp/localfile_block.xml' /var/ossec/etc/ossec.conf
+    fi
 
     systemctl daemon-reload
     systemctl enable wazuh-agent
