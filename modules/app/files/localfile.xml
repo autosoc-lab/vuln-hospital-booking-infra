@@ -10,3 +10,11 @@
     <log_format>json</log_format>
     <location>/var/lib/docker/containers/*/*-json.log</location>
   </localfile>
+  <localfile>
+    <log_format>audit</log_format>
+    <location>/var/log/audit/audit.log</location>
+  </localfile>
+  <localfile>
+    <log_format>syslog</log_format>
+    <location>/var/log/auth.log</location>
+  </localfile>
