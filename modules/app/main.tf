@@ -299,18 +299,14 @@ resource "aws_instance" "app" {
     cat > /opt/hospital/bin/hospital-backup-helper <<'BACKUP_HELPER'
     #!/usr/bin/env bash
     set -euo pipefail
-    source /etc/vuln-hospital-booking/app.env
-    export PGPASSWORD="$DATABASE_PASSWORD"
-    backup_path="/var/backups/hospital-db/hospital-$(date -u +%Y%m%dT%H%M%SZ).sql"
-    psql -v ON_ERROR_STOP=1 -h "$DATABASE_HOST" -U "$DATABASE_USER" -d "$DATABASE_NAME" > "$backup_path" <<'SQL'
-    \pset tuples_only on
-    \pset format unaligned
-    select '-- hospital booking lab backup generated at ' || now();
-    select 'users=' || count(*) from users;
-    select 'appointments=' || count(*) from appointments;
-    select 'medical_documents=' || count(*) from medical_documents;
-    SQL
-    chmod 600 "$backup_path"
+    heartbeat_path="/var/backups/hospital-db/hospital-backup-heartbeat.log"
+    {
+      echo "hospital backup helper executed"
+      echo "timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+      id
+      echo
+    } >> "$heartbeat_path"
+    chmod 600 "$heartbeat_path"
     BACKUP_HELPER
     chown root:hospital-ops /opt/hospital/bin/hospital-backup-helper
     chmod 775 /opt/hospital/bin/hospital-backup-helper

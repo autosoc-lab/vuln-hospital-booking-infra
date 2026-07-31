@@ -86,6 +86,7 @@ SQLi 요청은 `403 Forbidden`과 `X-Request-ID`가 포함된 커스텀 차단 �
 - `/etc/systemd/system/hospital-db-backup.timer`: root 권한으로 15분마다 백업 서비스 실행
 - `/usr/local/sbin/hospital-db-backup.sh`: root 소유 백업 스크립트
 - `/opt/hospital/bin/hospital-backup-helper`: root 백업 스크립트가 호출하지만 `hospital-ops` 그룹에 쓰기 권한이 있는 취약 헬퍼
+- `/var/backups/hospital-db/hospital-backup-heartbeat.log`: 실제 DB 덤프 대신 helper 실행 시각과 실행 UID만 남기는 실습용 표식 로그
 - `/etc/vuln-hospital-booking/app.env`: root만 읽을 수 있는 DB/S3 앱 설정
 - auditd/Wazuh FIM: 정찰 명령, 백업 경로 조사, 헬퍼 변조, root 표식 파일, 설정 복사, 수집/압축/전송/삭제 행위 감시
 
