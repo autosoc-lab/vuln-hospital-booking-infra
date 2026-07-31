@@ -1,0 +1,137 @@
+<!--
+  Leaked SSH key -> EC2 compromise -> root backup helper abuse -> data collection
+  scenario rules for the Vulnerable Hospital Booking lab.
+
+  Expected data sources:
+    - /var/log/auth.log: SSH authentication events
+    - /var/log/audit/audit.log: auditd execve and watched file access events
+    - Wazuh FIM/syscheck: backup helper, root marker, and staging path changes
+
+  Rule IDs are kept in the Wazuh custom range 100000-120000.
+-->
+
+<group name="hospital_ssh_compromise,hospital_privilege_escalation,hospital_data_exfiltration,attack_scenario,">
+
+  <!-- 100170: deploy 계정의 로그인 직후 정찰 명령 후보를 auditd execve에서 탐지한다. -->
+  <rule id="100170" level="10">
+    <if_group>audit</if_group>
+    <field name="audit.key">^hospital-lab-exec$</field>
+    <field name="audit.auid" type="pcre2">^[1-9][0-9]{3,}$</field>
+    <field name="audit.command" type="pcre2">(?i)\b(?:whoami|id|groups|sudo\s+-l|hostname|uname|ip\s+addr|docker\s+compose\s+ps)\b</field>
+    <description>Hospital EC2 account or system discovery command executed: $(audit.command)</description>
+    <mitre>
+      <id>T1033</id>
+      <id>T1082</id>
+    </mitre>
+    <group>ssh_compromise,discovery,</group>
+  </rule>
+
+  <!-- 100171: systemd 백업 타이머와 root 서비스 구조 조사 행위를 탐지한다. -->
+  <rule id="100171" level="11">
+    <if_group>audit</if_group>
+    <field name="audit.key">^hospital-lab-exec$</field>
+    <field name="audit.command" type="pcre2">(?i)systemctl\s+(?:list-timers|cat|status).*(?:hospital-db-backup|timer|service)</field>
+    <description>Hospital backup timer or root service was inspected: $(audit.command)</description>
+    <mitre>
+      <id>T1007</id>
+      <id>T1083</id>
+    </mitre>
+    <group>ssh_compromise,service_discovery,</group>
+  </rule>
+
+  <!-- 100172: root 백업 경로가 호출하는 그룹 쓰기 가능 헬퍼 파일 변경을 FIM으로 탐지한다. -->
+  <rule id="100172" level="15">
+    <if_group>syscheck</if_group>
+    <field name="syscheck.path" type="pcre2">^/opt/hospital/bin/hospital-backup-helper$</field>
+    <description>Hospital root backup helper changed: $(syscheck.path)</description>
+    <mitre>
+      <id>T1068</id>
+    </mitre>
+    <group>privilege_escalation,fim,critical,</group>
+  </rule>
+
+  <!-- 100173: 변조된 헬퍼가 root로 실행되었을 때 생성되는 표식 파일을 탐지한다. -->
+  <rule id="100173" level="15">
+    <if_group>syscheck</if_group>
+    <field name="syscheck.path" type="pcre2">^/tmp/wazuh-root-proof$</field>
+    <description>Hospital root privilege proof marker observed: $(syscheck.path)</description>
+    <mitre>
+      <id>T1068</id>
+    </mitre>
+    <group>privilege_escalation,root_execution,fim,critical,</group>
+  </rule>
+
+  <!-- 100174: root 전용 앱 설정 파일 접근 및 /tmp 복사본 생성을 탐지한다. -->
+  <rule id="100174" level="15">
+    <if_group>audit</if_group>
+    <field name="audit.key" type="pcre2">^(?:hospital-app-env-read|hospital-sensitive-copy)$</field>
+    <description>Hospital root-only application configuration was accessed or staged</description>
+    <mitre>
+      <id>T1552.001</id>
+    </mitre>
+    <group>credential_access,sensitive_file_access,critical,</group>
+  </rule>
+
+  <!-- 100175: DB 조회 및 의료 데이터 수집에 흔히 쓰이는 psql/copy 실행을 탐지한다. -->
+  <rule id="100175" level="13">
+    <if_group>audit</if_group>
+    <field name="audit.key">^hospital-lab-exec$</field>
+    <field name="audit.command" type="pcre2">(?i)\bpsql\b.*(?:select|copy|\\copy|appointments|medical_documents|users)</field>
+    <description>Hospital database data collection command executed: $(audit.command)</description>
+    <mitre>
+      <id>T1005</id>
+      <id>T1074.001</id>
+    </mitre>
+    <group>database_access,data_collection,</group>
+  </rule>
+
+  <!-- 100176: /tmp 실습 수집 경로를 대상으로 한 tar/gzip/zip 압축 실행을 탐지한다. -->
+  <rule id="100176" level="14">
+    <if_group>audit</if_group>
+    <field name="audit.key">^hospital-lab-exec$</field>
+    <field name="audit.command" type="pcre2">(?i)\b(?:tar|gzip|zip)\b.*(?:/tmp/wazuh-edr-lab-collection|/tmp/wazuh-edr-lab)</field>
+    <description>Hospital staged data was archived from /tmp: $(audit.command)</description>
+    <mitre>
+      <id>T1560.001</id>
+    </mitre>
+    <group>collection,archive,</group>
+  </rule>
+
+  <!-- 100177: 수집 아카이브를 외부로 전송하는 도구 실행을 탐지한다. -->
+  <rule id="100177" level="15">
+    <if_group>audit</if_group>
+    <field name="audit.key">^hospital-lab-exec$</field>
+    <field name="audit.command" type="pcre2">(?i)\b(?:scp|curl|nc|ncat|netcat)\b.*(?:wazuh-edr-lab-collection|\.tar\.gz)</field>
+    <description>Hospital staged data exfiltration tool executed: $(audit.command)</description>
+    <mitre>
+      <id>T1048</id>
+    </mitre>
+    <group>exfiltration,critical,</group>
+  </rule>
+
+  <!-- 100178: 반출 이후 임시 수집물 또는 셸 히스토리 삭제 시도를 탐지한다. -->
+  <rule id="100178" level="14">
+    <if_group>audit</if_group>
+    <field name="audit.key">^hospital-lab-exec$</field>
+    <field name="audit.command" type="pcre2">(?i)\b(?:rm|shred|truncate)\b.*(?:wazuh-edr-lab|wazuh-root-proof|\.bash_history|history)</field>
+    <description>Hospital lab cleanup or history tampering command executed: $(audit.command)</description>
+    <mitre>
+      <id>T1070.003</id>
+    </mitre>
+    <group>defense_evasion,cleanup,</group>
+  </rule>
+
+  <!-- 100179: 권한 상승 표식 이후 같은 에이전트에서 민감 설정 접근이 이어진 공격 체인을 상관분석한다. -->
+  <rule id="100179" level="15">
+    <if_sid>100174</if_sid>
+    <if_matched_sid>100173</if_matched_sid>
+    <same_field>agent.id</same_field>
+    <description>Hospital privilege escalation marker followed by root-only app configuration access</description>
+    <mitre>
+      <id>T1068</id>
+      <id>T1552.001</id>
+    </mitre>
+    <group>attack_scenario,privilege_escalation,credential_access,critical,</group>
+  </rule>
+
+</group>

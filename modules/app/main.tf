@@ -221,11 +221,26 @@ resource "aws_instance" "app" {
     #!/bin/bash
     set -e
     apt-get update -y
-    apt-get install -y git postgresql-client ca-certificates curl
+    apt-get install -y git postgresql-client ca-certificates curl auditd audispd-plugins
     curl -fsSL https://get.docker.com | sh
     systemctl enable docker
     systemctl start docker
     usermod -aG docker ubuntu
+
+    # Leaked SSH key lab account. The same lab keypair is intentionally trusted
+    # for deploy so the initial-access exercise can start from ssh -i.
+    groupadd -f hospital-ops
+    if ! id deploy >/dev/null 2>&1; then
+      useradd -m -s /bin/bash -G hospital-ops deploy
+    else
+      usermod -aG hospital-ops deploy
+    fi
+    install -d -m 700 -o deploy -g deploy /home/deploy/.ssh
+    cat > /home/deploy/.ssh/authorized_keys <<'DEPLOY_AUTHORIZED_KEYS'
+    ${trimspace(file("${path.root}/ssh/vuln-hospital-lab.pub"))}
+    DEPLOY_AUTHORIZED_KEYS
+    chown deploy:deploy /home/deploy/.ssh/authorized_keys
+    chmod 600 /home/deploy/.ssh/authorized_keys
 
     # 앱 클론 (SQLi 실습 코드가 병합된 브랜치)
     git clone -b ${var.app_git_ref} https://github.com/autosoc-lab/vuln-hospital-booking /opt/app
@@ -261,6 +276,88 @@ resource "aws_instance" "app" {
     # 시드된 문서 원본 파일을 S3로 마이그레이션 (SSE-C 실습 대상)
     docker compose $COMPOSE_FILES exec -T web flask --app run migrate-storage-to-s3
 
+    # Root-only app configuration copied by the vulnerable backup-helper lab.
+    install -d -m 750 -o root -g hospital-ops /etc/vuln-hospital-booking
+    cat > /etc/vuln-hospital-booking/app.env <<'APP_ENV'
+    DATABASE_URL=postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/hospital
+    DATABASE_HOST=${aws_db_instance.postgres.address}
+    DATABASE_NAME=hospital
+    DATABASE_USER=${var.db_username}
+    DATABASE_PASSWORD=${var.db_password}
+    DOCUMENT_STORAGE_BUCKET=${aws_s3_bucket.documents.bucket}
+    STORAGE_BACKEND=s3
+    AWS_REGION=ap-northeast-2
+    APP_ENV
+    chown root:root /etc/vuln-hospital-booking/app.env
+    chmod 600 /etc/vuln-hospital-booking/app.env
+
+    # INTENTIONALLY WEAK - FOR LAB USE ONLY.
+    # Root's backup service calls a helper in a group-writable operational path.
+    # deploy cannot edit the root service, but can modify/replace this helper.
+    install -d -m 775 -o root -g hospital-ops /opt/hospital/bin
+    install -d -m 750 -o root -g root /var/backups/hospital-db
+    cat > /opt/hospital/bin/hospital-backup-helper <<'BACKUP_HELPER'
+    #!/usr/bin/env bash
+    set -euo pipefail
+    source /etc/vuln-hospital-booking/app.env
+    export PGPASSWORD="$DATABASE_PASSWORD"
+    backup_path="/var/backups/hospital-db/hospital-$(date -u +%Y%m%dT%H%M%SZ).sql"
+    pg_dump -h "$DATABASE_HOST" -U "$DATABASE_USER" -d "$DATABASE_NAME" > "$backup_path"
+    chmod 600 "$backup_path"
+    BACKUP_HELPER
+    chown root:hospital-ops /opt/hospital/bin/hospital-backup-helper
+    chmod 775 /opt/hospital/bin/hospital-backup-helper
+
+    cat > /usr/local/sbin/hospital-db-backup.sh <<'BACKUP_SCRIPT'
+    #!/usr/bin/env bash
+    set -euo pipefail
+    exec /opt/hospital/bin/hospital-backup-helper
+    BACKUP_SCRIPT
+    chown root:root /usr/local/sbin/hospital-db-backup.sh
+    chmod 755 /usr/local/sbin/hospital-db-backup.sh
+
+    cat > /etc/systemd/system/hospital-db-backup.service <<'BACKUP_SERVICE'
+    [Unit]
+    Description=Hospital database backup lab service
+
+    [Service]
+    Type=oneshot
+    User=root
+    Group=root
+    ExecStart=/usr/local/sbin/hospital-db-backup.sh
+    BACKUP_SERVICE
+
+    cat > /etc/systemd/system/hospital-db-backup.timer <<'BACKUP_TIMER'
+    [Unit]
+    Description=Run hospital database backup lab service
+
+    [Timer]
+    OnBootSec=10min
+    OnUnitActiveSec=15min
+    Unit=hospital-db-backup.service
+
+    [Install]
+    WantedBy=timers.target
+    BACKUP_TIMER
+
+    install -d -m 1777 /tmp/wazuh-edr-lab
+    install -d -m 1777 /tmp/wazuh-edr-lab-collection
+
+    cat > /etc/audit/rules.d/hospital-lab.rules <<'AUDIT_RULES'
+    -a always,exit -F arch=b64 -S execve -F auid>=1000 -F auid!=4294967295 -k hospital-lab-exec
+    -a always,exit -F arch=b32 -S execve -F auid>=1000 -F auid!=4294967295 -k hospital-lab-exec
+    -w /usr/local/sbin/hospital-db-backup.sh -p r -k hospital-backup-read
+    -w /opt/hospital/bin/hospital-backup-helper -p wa -k hospital-helper-change
+    -w /etc/vuln-hospital-booking/app.env -p r -k hospital-app-env-read
+    -w /tmp/wazuh-edr-lab -p wa -k hospital-sensitive-copy
+    -w /tmp/wazuh-edr-lab-collection -p wa -k hospital-data-collection
+    AUDIT_RULES
+    augenrules --load || auditctl -R /etc/audit/rules.d/hospital-lab.rules
+    systemctl enable auditd
+    systemctl restart auditd || true
+    systemctl daemon-reload
+    systemctl enable --now hospital-db-backup.timer
+
     # Wazuh 매니저의 에이전트 등록 포트(1515)가 열릴 때까지 대기 (all-in-one 설치는 수 분~10분 이상 소요, 최대 20분 대기)
     for i in $(seq 1 120); do
       if (exec 3<>/dev/tcp/${var.wazuh_manager_private_ip}/1515) 2>/dev/null; then
@@ -293,6 +390,17 @@ resource "aws_instance" "app" {
 
     if ! grep -q '/opt/app/logs/app.log' /var/ossec/etc/ossec.conf; then
       sed -i '/<ossec_config>/r /tmp/localfile_block.xml' /var/ossec/etc/ossec.conf
+    fi
+
+    # FIM coverage for the privilege-escalation lab paths.
+    if ! grep -q '/opt/hospital/bin' /var/ossec/etc/ossec.conf; then
+      sed -i '/<syscheck>/a\
+      <directories realtime="yes" check_all="yes">/opt/hospital/bin</directories>\
+      <directories realtime="yes" check_all="yes">/usr/local/sbin/hospital-db-backup.sh</directories>\
+      <directories realtime="yes" check_all="yes">/etc/vuln-hospital-booking</directories>\
+      <directories realtime="yes" check_all="yes">/tmp</directories>\
+      <directories realtime="yes" check_all="yes">/tmp/wazuh-edr-lab</directories>\
+      <directories realtime="yes" check_all="yes">/tmp/wazuh-edr-lab-collection</directories>' /var/ossec/etc/ossec.conf
     fi
 
     systemctl daemon-reload

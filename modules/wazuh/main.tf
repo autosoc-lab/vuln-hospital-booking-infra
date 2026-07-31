@@ -139,21 +139,21 @@ resource "aws_iam_instance_profile" "wazuh_ec2" {
   role = aws_iam_role.wazuh_ec2.name
 }
 
-# vuln_hospital_sqli_pdf_rce.xml/디코더는 EC2 user_data 16KB 한도를 넘어서 직접 임베드할 수 없다.
+# vuln_hospital_ssh_compromise.xml/디코더는 EC2 user_data 16KB 한도를 넘어서 직접 임베드할 수 없다.
 # 이미 CloudTrail/VPC Flow Logs가 쌓이는 로그 버킷에 별도 prefix로 얹어두고, wazuh EC2 역할이
 # 이미 그 버킷 전체에 대해 가진 s3:GetObject/ListBucket 권한(wazuh_logs_read)을 그대로 재사용한다.
-resource "aws_s3_object" "hospital_rules" {
-  bucket      = var.log_bucket_name
-  key         = "wazuh-rules/vuln_hospital_sqli_pdf_rce.xml"
-  content     = file("${path.module}/files/vuln_hospital_sqli_pdf_rce.xml")
-  etag        = filemd5("${path.module}/files/vuln_hospital_sqli_pdf_rce.xml")
+resource "aws_s3_object" "hospital_ssh_compromise_rules" {
+  bucket  = var.log_bucket_name
+  key     = "wazuh-rules/vuln_hospital_ssh_compromise.xml"
+  content = file("${path.module}/files/vuln_hospital_ssh_compromise.xml")
+  etag    = filemd5("${path.module}/files/vuln_hospital_ssh_compromise.xml")
 }
 
 resource "aws_s3_object" "hospital_decoders" {
-  bucket      = var.log_bucket_name
-  key         = "wazuh-rules/vuln_hospital_decoders.xml"
-  content     = file("${path.module}/files/vuln_hospital_decoders.xml")
-  etag        = filemd5("${path.module}/files/vuln_hospital_decoders.xml")
+  bucket  = var.log_bucket_name
+  key     = "wazuh-rules/vuln_hospital_decoders.xml"
+  content = file("${path.module}/files/vuln_hospital_decoders.xml")
+  etag    = filemd5("${path.module}/files/vuln_hospital_decoders.xml")
 }
 
 # --- Wazuh 매니저/인덱서/대시보드 (all-in-one 단일 노드) ---
@@ -168,7 +168,7 @@ resource "aws_instance" "wazuh" {
   # user_data는 최초 부팅 때만 실행되므로, 바뀔 때마다 인스턴스를 새로 만들어 cloud-init이 다시 돌게 함
   user_data_replace_on_change = true
   # S3에 룰/디코더 파일이 먼저 올라가 있어야 user_data의 aws s3 cp가 성공한다
-  depends_on = [aws_s3_object.hospital_rules, aws_s3_object.hospital_decoders]
+  depends_on = [aws_s3_object.hospital_ssh_compromise_rules, aws_s3_object.hospital_decoders]
 
   # 기본 8GB로는 indexer(850MB+)/manager/filebeat/dashboard 설치 중 디스크가 꽉 참
   root_block_device {
@@ -214,13 +214,11 @@ resource "aws_instance" "wazuh" {
     ${file("${path.module}/files/local_rules.xml")}
     LOCAL_RULES_XML
 
-    # access.log SQLi/문서다운로드/킬체인 + Flask stdout app_event/security_event(세션 하이재킹, PDF RCE) +
-    # audit/네트워크 상관분석까지 포함하는 통합 룰셋. 앱 레포 detection-rules/vuln_hospital_rules.xml은
-    # 이 파일로 대체되었으므로 더 이상 받아오지 않는다(룰 ID 100300번대가 겹쳐 동시 로드 시 충돌함).
+    # 유출 SSH 키 기반 EC2 침해, 백업 헬퍼 권한 상승, DB 수집/반출 흐름 탐지용 룰셋.
     # 이 파일(+디코더)은 EC2 user_data의 16KB 한도를 넘어서 직접 임베드할 수 없어 S3에 올려두고 받아온다.
     apt-get update -y
     apt-get install -y awscli
-    aws s3 cp "s3://${var.log_bucket_name}/wazuh-rules/vuln_hospital_sqli_pdf_rce.xml" /var/ossec/etc/rules/vuln_hospital_sqli_pdf_rce.xml
+    aws s3 cp "s3://${var.log_bucket_name}/wazuh-rules/vuln_hospital_ssh_compromise.xml" /var/ossec/etc/rules/vuln_hospital_ssh_compromise.xml
     aws s3 cp "s3://${var.log_bucket_name}/wazuh-rules/vuln_hospital_decoders.xml" /var/ossec/etc/decoders/vuln_hospital_decoders.xml
 
     systemctl restart wazuh-manager

