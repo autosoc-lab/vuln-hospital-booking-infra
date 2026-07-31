@@ -302,7 +302,14 @@ resource "aws_instance" "app" {
     source /etc/vuln-hospital-booking/app.env
     export PGPASSWORD="$DATABASE_PASSWORD"
     backup_path="/var/backups/hospital-db/hospital-$(date -u +%Y%m%dT%H%M%SZ).sql"
-    pg_dump -h "$DATABASE_HOST" -U "$DATABASE_USER" -d "$DATABASE_NAME" > "$backup_path"
+    psql -v ON_ERROR_STOP=1 -h "$DATABASE_HOST" -U "$DATABASE_USER" -d "$DATABASE_NAME" > "$backup_path" <<'SQL'
+    \pset tuples_only on
+    \pset format unaligned
+    select '-- hospital booking lab backup generated at ' || now();
+    select 'users=' || count(*) from users;
+    select 'appointments=' || count(*) from appointments;
+    select 'medical_documents=' || count(*) from medical_documents;
+    SQL
     chmod 600 "$backup_path"
     BACKUP_HELPER
     chown root:hospital-ops /opt/hospital/bin/hospital-backup-helper
