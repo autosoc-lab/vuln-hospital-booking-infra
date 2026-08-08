@@ -59,3 +59,14 @@ variable "discord_webhook_url" {
   sensitive   = true
   default     = ""
 }
+
+variable "vpc_cidr" {
+  description = "VPC CIDR. 3001/3443을 내부(Wazuh 웹훅)에서만 열기 위해 사용."
+  type        = string
+}
+
+variable "admin_cidr" {
+  description = "대시보드 접속 허용 관리자 IP CIDR. 빈 값이면 외부 접속 규칙을 추가하지 않음."
+  type        = string
+  default     = ""
+}

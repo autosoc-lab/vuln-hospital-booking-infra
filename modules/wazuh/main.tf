@@ -271,7 +271,7 @@ resource "aws_instance" "wazuh" {
     # 시점에 미리 조립할 수 있어, 사람이 SSH로 켤 필요 없이 부팅 때 자동 등록한다.
     # (Shuffle이 아직 안 떠 있어도 config는 먼저 등록되고, Shuffle이 뜨면 알림이 흐른다.)
     /opt/soar-integration/enable-shuffle-integration.sh \
-      "http://${var.shuffle_public_ip}:3001/api/v1/hooks/webhook_${var.shuffle_webhook_hook_id}" \
+      "http://${var.shuffle_private_ip}:3001/api/v1/hooks/webhook_${var.shuffle_webhook_hook_id}" \
       ${var.shuffle_integration_level} || true
   EOF
 

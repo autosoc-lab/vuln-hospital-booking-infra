@@ -105,6 +105,12 @@ variable "discord_webhook_url" {
   default     = ""
 }
 
+variable "admin_cidr" {
+  description = "Shuffle 대시보드(3001/3443)에 접속 허용할 관리자 IP CIDR (예: \"1.2.3.4/32\"). 웹훅은 VPC 내부(Wazuh)에서만 오므로 이 값은 대시보드 접속용. 비우면 외부에서 대시보드 접속 불가(SSH 터널 필요)."
+  type        = string
+  default     = ""
+}
+
 # 현재 호출자의 AWS 계정 ID — S3 버킷명 등에 사용
 data "aws_caller_identity" "current" {}
 

@@ -48,8 +48,8 @@ variable "wazuh_version" {
   type        = string
 }
 
-variable "shuffle_public_ip" {
-  description = "Shuffle SOAR EC2의 퍼블릭 IP(EIP). Wazuh integration이 알림을 보낼 웹훅 호스트 (shuffle 모듈 output)."
+variable "shuffle_private_ip" {
+  description = "Shuffle SOAR EC2의 사설 IP. Wazuh integration이 웹훅을 VPC 내부로 보낼 대상 (shuffle SG가 외부 3001을 막으므로 사설IP로 전송)."
   type        = string
 }
 

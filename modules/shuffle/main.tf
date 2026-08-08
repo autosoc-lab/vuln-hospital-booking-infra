@@ -11,9 +11,9 @@ data "aws_ami" "ubuntu" {
 
 # --- 보안그룹: Shuffle SOAR용 ---
 # INTENTIONALLY PERMISSIVE - FOR LAB USE ONLY
-# 대시보드/웹훅(3001)은 실습 편의를 위해 0.0.0.0/0으로 개방 (wazuh 모듈과 동일 패턴).
-# 이렇게 열어야 브라우저로 워크플로를 만들면서 동시에 Wazuh가 보내는 웹훅도 같은
-# 포트로 받을 수 있다. 운영 환경이라면 관리자 IP + wazuh SG로 제한할 것.
+# 3001/3443은 0.0.0.0/0으로 열지 않는다. 웹훅은 Wazuh가 VPC 내부(사설IP)로 보내므로
+# vpc_cidr만 허용하면 되고, 대시보드는 관리자 IP(admin_cidr)만 허용한다. 이렇게 하면
+# git에 웹훅 hook id가 있어도 외부에서 위조 POST를 보낼 수 없다(외부 도달 자체가 차단).
 resource "aws_security_group" "shuffle" {
   name_prefix = "${var.project_name}-shuffle-sg-"
   description = "Shuffle SOAR frontend/webhook"
@@ -32,19 +32,19 @@ resource "aws_security_group" "shuffle" {
   }
 
   ingress {
-    description = "Shuffle dashboard / webhook intake (HTTP)"
+    description = "Shuffle HTTP - VPC 내부(Wazuh 웹훅) + 관리자 IP(대시보드)만"
     from_port   = 3001
     to_port     = 3001
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    cidr_blocks = compact([var.vpc_cidr, var.admin_cidr])
   }
 
   ingress {
-    description = "Shuffle dashboard / webhook intake (HTTPS)"
+    description = "Shuffle HTTPS - VPC 내부 + 관리자 IP만"
     from_port   = 3443
     to_port     = 3443
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    cidr_blocks = compact([var.vpc_cidr, var.admin_cidr])
   }
 
   egress {
