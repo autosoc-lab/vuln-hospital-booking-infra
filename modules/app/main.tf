@@ -354,6 +354,8 @@ resource "aws_instance" "app" {
     -w /etc/vuln-hospital-booking/app.env -p r -k hospital-app-env-read
     -w /tmp/wazuh-edr-lab -p wa -k hospital-sensitive-copy
     -w /tmp/wazuh-edr-lab-collection -p wa -k hospital-data-collection
+    -a always,exit -F arch=b64 -S openat,open -F path=/etc/systemd/system/hospital-db-backup.service -F auid>=1000 -F auid!=4294967295 -k hospital-backup-inspect
+    -a always,exit -F arch=b64 -S openat,open -F path=/etc/systemd/system/hospital-db-backup.timer -F auid>=1000 -F auid!=4294967295 -k hospital-backup-inspect
     AUDIT_RULES
     augenrules --load || auditctl -R /etc/audit/rules.d/hospital-lab.rules
     systemctl enable auditd
