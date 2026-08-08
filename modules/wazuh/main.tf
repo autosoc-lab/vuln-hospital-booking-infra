@@ -156,6 +156,32 @@ resource "aws_s3_object" "hospital_decoders" {
   etag    = filemd5("${path.module}/files/vuln_hospital_decoders.xml")
 }
 
+# Wazuh -> Shuffle SOAR 연동용 custom integration 스크립트 + 활성화 헬퍼.
+# 같은 이유(16KB user_data 한도)로 S3에 얹어서 배포한다. hook_url(Shuffle 웹훅 URL)은
+# Shuffle 워크플로를 만들어야 알 수 있는 값이라 여기서는 스크립트만 깔아두고, 실제
+# <integration> 블록 등록은 배포 후 enable-shuffle-integration.sh를 수동 실행해 켠다
+# (vuln-hospital-booking-soar/README.md 참고).
+resource "aws_s3_object" "shuffle_integration_wrapper" {
+  bucket  = var.log_bucket_name
+  key     = "wazuh-rules/custom-shuffle"
+  content = file("${path.module}/files/custom-shuffle")
+  etag    = filemd5("${path.module}/files/custom-shuffle")
+}
+
+resource "aws_s3_object" "shuffle_integration_script" {
+  bucket  = var.log_bucket_name
+  key     = "wazuh-rules/custom-shuffle.py"
+  content = file("${path.module}/files/custom-shuffle.py")
+  etag    = filemd5("${path.module}/files/custom-shuffle.py")
+}
+
+resource "aws_s3_object" "shuffle_integration_enable_script" {
+  bucket  = var.log_bucket_name
+  key     = "wazuh-rules/enable-shuffle-integration.sh"
+  content = file("${path.module}/files/enable-shuffle-integration.sh")
+  etag    = filemd5("${path.module}/files/enable-shuffle-integration.sh")
+}
+
 # --- Wazuh 매니저/인덱서/대시보드 (all-in-one 단일 노드) ---
 resource "aws_instance" "wazuh" {
   ami                         = data.aws_ami.ubuntu.id
@@ -167,8 +193,14 @@ resource "aws_instance" "wazuh" {
   iam_instance_profile        = aws_iam_instance_profile.wazuh_ec2.name
   # user_data는 최초 부팅 때만 실행되므로, 바뀔 때마다 인스턴스를 새로 만들어 cloud-init이 다시 돌게 함
   user_data_replace_on_change = true
-  # S3에 룰/디코더 파일이 먼저 올라가 있어야 user_data의 aws s3 cp가 성공한다
-  depends_on = [aws_s3_object.hospital_ssh_compromise_rules, aws_s3_object.hospital_decoders]
+  # S3에 룰/디코더/integration 파일이 먼저 올라가 있어야 user_data의 aws s3 cp가 성공한다
+  depends_on = [
+    aws_s3_object.hospital_ssh_compromise_rules,
+    aws_s3_object.hospital_decoders,
+    aws_s3_object.shuffle_integration_wrapper,
+    aws_s3_object.shuffle_integration_script,
+    aws_s3_object.shuffle_integration_enable_script,
+  ]
 
   # 기본 8GB로는 indexer(850MB+)/manager/filebeat/dashboard 설치 중 디스크가 꽉 참
   root_block_device {
@@ -220,6 +252,19 @@ resource "aws_instance" "wazuh" {
     apt-get install -y awscli
     aws s3 cp "s3://${var.log_bucket_name}/wazuh-rules/vuln_hospital_ssh_compromise.xml" /var/ossec/etc/rules/vuln_hospital_ssh_compromise.xml
     aws s3 cp "s3://${var.log_bucket_name}/wazuh-rules/vuln_hospital_decoders.xml" /var/ossec/etc/decoders/vuln_hospital_decoders.xml
+
+    # Shuffle SOAR 연동 스크립트 설치. <integration> 블록은 아직 넣지 않는다 — Shuffle
+    # 워크플로의 webhook URL을 알아야 하는데, 그건 Shuffle을 배포하고 워크플로를 만든
+    # 뒤에야 정해지기 때문. 배포 후 이 EC2에서 enable-shuffle-integration.sh를 실행해
+    # 켠다 (vuln-hospital-booking-soar/README.md 참고).
+    aws s3 cp "s3://${var.log_bucket_name}/wazuh-rules/custom-shuffle" /var/ossec/integrations/custom-shuffle
+    aws s3 cp "s3://${var.log_bucket_name}/wazuh-rules/custom-shuffle.py" /var/ossec/integrations/custom-shuffle.py
+    chown root:wazuh /var/ossec/integrations/custom-shuffle /var/ossec/integrations/custom-shuffle.py
+    chmod 750 /var/ossec/integrations/custom-shuffle /var/ossec/integrations/custom-shuffle.py
+
+    install -d -m 750 /opt/soar-integration
+    aws s3 cp "s3://${var.log_bucket_name}/wazuh-rules/enable-shuffle-integration.sh" /opt/soar-integration/enable-shuffle-integration.sh
+    chmod 750 /opt/soar-integration/enable-shuffle-integration.sh
 
     systemctl restart wazuh-manager
   EOF

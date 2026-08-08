@@ -47,7 +47,25 @@ module "wazuh" {
   wazuh_version         = var.wazuh_version
 }
 
-# 4. C2/수집 서버 — 공격자 소유로 가정하는 독립 EC2 (RCE/SSRF 실습에서 탈취 데이터를 받는 쪽)
+# 4. Shuffle SOAR 계층 — Wazuh 알림을 받아 대응 워크플로를 실행하는 자동화 서버
+# wazuh 모듈보다 먼저 생성될 필요는 없지만, wazuh EC2의 integration 스크립트가
+# 이 서버의 웹훅 URL을 필요로 하므로 통상 wazuh -> shuffle 순으로 값을 채워나간다.
+module "shuffle" {
+  source = "./modules/shuffle"
+
+  project_name                = var.project_name
+  common_tags                 = local.common_tags
+  vpc_id                      = module.networking.vpc_id
+  public_subnet_id            = module.networking.public_subnet_id
+  key_pair_name               = aws_key_pair.app.key_name
+  soar_git_ref                = var.soar_git_ref
+  shuffle_admin_username      = var.shuffle_admin_username
+  shuffle_admin_password      = var.shuffle_admin_password
+  shuffle_encryption_modifier = var.shuffle_encryption_modifier
+  shuffle_opensearch_password = var.shuffle_opensearch_password
+}
+
+# 5. C2/수집 서버 — 공격자 소유로 가정하는 독립 EC2 (RCE/SSRF 실습에서 탈취 데이터를 받는 쪽)
 module "c2" {
   source = "./modules/c2"
 
@@ -59,7 +77,7 @@ module "c2" {
   c2_lab_token     = var.c2_lab_token
 }
 
-# 5. 애플리케이션 계층 — EC2, RDS, Elastic IP
+# 6. 애플리케이션 계층 — EC2, RDS, Elastic IP
 module "app" {
   source = "./modules/app"
 

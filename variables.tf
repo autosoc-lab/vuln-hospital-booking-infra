@@ -67,6 +67,37 @@ variable "c2_lab_token" {
   sensitive   = true
 }
 
+# Shuffle SOAR 서버(vuln-hospital-booking-soar)가 clone할 브랜치
+variable "soar_git_ref" {
+  description = "EC2가 clone할 vuln-hospital-booking-soar 브랜치명"
+  type        = string
+  default     = "main"
+}
+
+variable "shuffle_admin_username" {
+  description = "Shuffle 최초 관리자 계정명"
+  type        = string
+  default     = "admin"
+}
+
+variable "shuffle_admin_password" {
+  description = "Shuffle 최초 관리자 비밀번호 (min length 8 권장)"
+  type        = string
+  sensitive   = true
+}
+
+variable "shuffle_encryption_modifier" {
+  description = "Shuffle 앱 인증정보 암호화 시드 — 한 번 정하면 바꾸지 말 것 (openssl rand -hex 32)"
+  type        = string
+  sensitive   = true
+}
+
+variable "shuffle_opensearch_password" {
+  description = "Shuffle 내장 OpenSearch 관리자 비밀번호 (대소문자/숫자/특수문자 포함 8자 이상)"
+  type        = string
+  sensitive   = true
+}
+
 # 현재 호출자의 AWS 계정 ID — S3 버킷명 등에 사용
 data "aws_caller_identity" "current" {}
 

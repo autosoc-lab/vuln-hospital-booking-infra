@@ -48,3 +48,8 @@ output "wazuh_dashboard_url" {
   description = "Wazuh 대시보드 URL (초기 로그인 정보는 SSH 접속 후 wazuh-install-files.tar 참고)"
   value       = "https://${module.wazuh.manager_public_ip}"
 }
+
+output "shuffle_dashboard_url" {
+  description = "Shuffle SOAR 웹 UI URL (워크플로 생성, 웹훅 URL 확인용 — shuffle_admin_username/password로 로그인)"
+  value       = module.shuffle.dashboard_url
+}
