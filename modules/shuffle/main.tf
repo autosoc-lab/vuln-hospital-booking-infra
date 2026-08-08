@@ -111,7 +111,7 @@ resource "aws_instance" "shuffle" {
     #!/bin/bash
     set -e
 
-    # t3.medium(4GB RAM)에서 opensearch + 나머지 컨테이너가 안정적으로 뜨도록 스왑 추가
+    # t3.small(2GB RAM)에서 opensearch + 나머지 컨테이너가 뜨도록 스왑 2G 추가 (총 4GB)
     fallocate -l 2G /swapfile
     chmod 600 /swapfile
     mkswap /swapfile
@@ -134,9 +134,13 @@ resource "aws_instance" "shuffle" {
     # IMDSv2 토큰 기반 조회 (계정이 IMDSv2를 강제하는 경우에도 동작)
     TOKEN=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
     PUBLIC_IP=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/public-ipv4)
+    # orborus/worker가 backend에 도달할 때 쓰는 호스트. 컨테이너 기본값(shuffle-backend)으로
+    # 두면 swarm worker가 backend를 못 찾아 워크플로가 EXECUTING에서 멈춘다 → 사설IP로 고정.
+    PRIVATE_IP=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/local-ipv4)
 
     sed -i "s|^BASE_URL=.*|BASE_URL=http://$PUBLIC_IP:5001|" .env
     sed -i "s|^SSO_REDIRECT_URL=.*|SSO_REDIRECT_URL=http://$PUBLIC_IP:3001|" .env
+    sed -i "s|^OUTER_HOSTNAME=.*|OUTER_HOSTNAME=$PRIVATE_IP|" .env
     sed -i "s|^SHUFFLE_ENCRYPTION_MODIFIER=.*|SHUFFLE_ENCRYPTION_MODIFIER=${var.shuffle_encryption_modifier}|" .env
     sed -i "s|^SHUFFLE_OPENSEARCH_PASSWORD=.*|SHUFFLE_OPENSEARCH_PASSWORD=${var.shuffle_opensearch_password}|" .env
     sed -i "s|^OPENSEARCH_INITIAL_ADMIN_PASSWORD=.*|OPENSEARCH_INITIAL_ADMIN_PASSWORD=${var.shuffle_opensearch_password}|" .env
