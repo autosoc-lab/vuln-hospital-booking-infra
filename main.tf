@@ -65,6 +65,7 @@ module "shuffle" {
   shuffle_admin_password      = var.shuffle_admin_password
   shuffle_encryption_modifier = var.shuffle_encryption_modifier
   shuffle_opensearch_password = var.shuffle_opensearch_password
+  discord_webhook_url         = var.discord_webhook_url
 }
 
 # 5. C2/수집 서버 — 공격자 소유로 가정하는 독립 EC2 (RCE/SSRF 실습에서 탈취 데이터를 받는 쪽)

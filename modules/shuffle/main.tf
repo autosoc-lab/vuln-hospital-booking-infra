@@ -147,6 +147,10 @@ resource "aws_instance" "shuffle" {
     sed -i "s|^SHUFFLE_DEFAULT_USERNAME=.*|SHUFFLE_DEFAULT_USERNAME=${var.shuffle_admin_username}|" .env
     sed -i "s|^SHUFFLE_DEFAULT_PASSWORD=.*|SHUFFLE_DEFAULT_PASSWORD=${var.shuffle_admin_password}|" .env
 
+    # Discord 웹훅 URL을 .env에 추가 → bootstrap-import.sh가 워크플로의 Discord url에 주입.
+    # .env.example엔 없는 키라 append. 빈 값이면 bootstrap이 주입을 건너뛴다.
+    echo "DISCORD_WEBHOOK_URL=${var.discord_webhook_url}" >> .env
+
     docker compose up -d
 
     # 워크플로 자동 복원 (재배포 시 workflows/*.json 을 Shuffle 에 import).
