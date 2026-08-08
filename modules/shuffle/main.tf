@@ -93,7 +93,7 @@ resource "aws_iam_instance_profile" "shuffle_ec2" {
 # --- Shuffle SOAR (frontend + backend + orborus + opensearch, docker compose 단일 노드) ---
 resource "aws_instance" "shuffle" {
   ami                         = data.aws_ami.ubuntu.id
-  instance_type               = "t3.medium"
+  instance_type               = "t3.small"
   subnet_id                   = var.public_subnet_id
   vpc_security_group_ids      = [aws_security_group.shuffle.id]
   associate_public_ip_address = true
@@ -144,6 +144,10 @@ resource "aws_instance" "shuffle" {
     sed -i "s|^SHUFFLE_DEFAULT_PASSWORD=.*|SHUFFLE_DEFAULT_PASSWORD=${var.shuffle_admin_password}|" .env
 
     docker compose up -d
+
+    # 워크플로 자동 복원 (재배포 시 workflows/*.json 을 Shuffle 에 import).
+    # 실패해도 부팅은 계속됨 — 그 경우 Shuffle UI(Workflows -> Import)로 수동 복원.
+    bash /opt/soar/bootstrap-import.sh >> /var/log/shuffle-bootstrap.log 2>&1 || true
   EOF
 
   tags = merge(var.common_tags, {
