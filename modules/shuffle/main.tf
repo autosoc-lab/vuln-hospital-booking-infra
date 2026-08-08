@@ -9,6 +9,14 @@ data "aws_ami" "ubuntu" {
   }
 }
 
+# admin_cidr에 마스크(/32 등)가 없으면 단일 IP로 보고 /32를 자동으로 붙인다.
+# (사용자가 "1.2.3.4"만 넣어도 "1.2.3.4/32"로 처리)
+locals {
+  admin_cidr_norm = var.admin_cidr == "" ? "" : (
+    length(regexall("/", var.admin_cidr)) > 0 ? var.admin_cidr : "${var.admin_cidr}/32"
+  )
+}
+
 # --- 보안그룹: Shuffle SOAR용 ---
 # INTENTIONALLY PERMISSIVE - FOR LAB USE ONLY
 # 3001/3443은 0.0.0.0/0으로 열지 않는다. 웹훅은 Wazuh가 VPC 내부(사설IP)로 보내므로
@@ -32,19 +40,19 @@ resource "aws_security_group" "shuffle" {
   }
 
   ingress {
-    description = "Shuffle HTTP - VPC 내부(Wazuh 웹훅) + 관리자 IP(대시보드)만"
+    description = "Shuffle HTTP - VPC internal (Wazuh webhook) + admin IP (dashboard)"
     from_port   = 3001
     to_port     = 3001
     protocol    = "tcp"
-    cidr_blocks = compact([var.vpc_cidr, var.admin_cidr])
+    cidr_blocks = compact([var.vpc_cidr, local.admin_cidr_norm])
   }
 
   ingress {
-    description = "Shuffle HTTPS - VPC 내부 + 관리자 IP만"
+    description = "Shuffle HTTPS - VPC internal + admin IP"
     from_port   = 3443
     to_port     = 3443
     protocol    = "tcp"
-    cidr_blocks = compact([var.vpc_cidr, var.admin_cidr])
+    cidr_blocks = compact([var.vpc_cidr, local.admin_cidr_norm])
   }
 
   egress {
