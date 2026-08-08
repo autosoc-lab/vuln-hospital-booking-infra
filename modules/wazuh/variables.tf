@@ -47,3 +47,25 @@ variable "wazuh_version" {
   description = "설치할 Wazuh major.minor 버전 (app 모듈의 에이전트와 반드시 일치해야 함)"
   type        = string
 }
+
+variable "shuffle_public_ip" {
+  description = "Shuffle SOAR EC2의 퍼블릭 IP(EIP). Wazuh integration이 알림을 보낼 웹훅 호스트 (shuffle 모듈 output)."
+  type        = string
+}
+
+variable "shuffle_webhook_hook_id" {
+  description = <<-EOT
+    Shuffle "Wazuh Alert Router" 워크플로 웹훅 트리거의 id.
+    bootstrap-import.sh가 이 id로 웹훅을 start하므로 재배포해도 URL이 고정된다
+    (vuln-hospital-booking-soar/workflows/Wazuh Alert Router.json 의 WEBHOOK trigger id).
+    워크플로의 웹훅 트리거를 새로 만들면 이 값을 그 id로 교체할 것.
+  EOT
+  type        = string
+  default     = "8e84e673-e96b-4807-956d-92a05fb06ed3"
+}
+
+variable "shuffle_integration_level" {
+  description = "이 레벨 이상의 Wazuh 알림만 Shuffle로 전달 (enable-shuffle-integration.sh 두 번째 인자)."
+  type        = number
+  default     = 6
+}
