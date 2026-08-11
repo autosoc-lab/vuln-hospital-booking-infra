@@ -45,7 +45,7 @@
   <rule id="100013" level="14">
     <if_sid>100012</if_sid>
     <field name="query_string" type="pcre2">(?i)169\.254\.169\.254.*security-credentials</field>
-    <description>SSRF -&gt; EC2 IMDS IAM role credential theft attempt: $(query_string)</description>
+    <description>SSRF -> EC2 IMDS IAM role credential theft attempt: $(query_string)</description>
     <mitre>
       <id>T1552.005</id>
     </mitre>
@@ -57,7 +57,7 @@
   <rule id="100014" level="15">
     <if_sid>100013</if_sid>
     <field name="status_code">^200$</field>
-    <description>SSRF -&gt; EC2 IMDS credential theft CONFIRMED (HTTP 200 on $(path)): IAM role credentials likely exfiltrated</description>
+    <description>SSRF -> EC2 IMDS credential theft CONFIRMED (HTTP 200 on $(path)): IAM role credentials likely exfiltrated</description>
     <mitre>
       <id>T1552.005</id>
     </mitre>
@@ -229,6 +229,32 @@
       <id>T1041</id>
     </mitre>
     <group>vpcflow,exfil,</group>
+  </rule>
+
+  <!-- 앱 서버 아웃바운드 화이트리스트(default-deny) 기반 이상탐지.
+       앱 서버(hospital app EC2)는 역할이 고정된 백엔드라 평소 나가는 곳이 뻔하다:
+       RDS(5432), Wazuh 매니저(1514/1515 에이전트 트래픽), 그리고 S3/패키지 저장소 등
+       목적지 IP가 계속 바뀌는 대상에 대한 표준 웹/DNS 포트(80/443/53) 뿐이다.
+       그 외 목적지/포트로 나가는 연결은 (C2 업로드처럼) 예상 밖의 반출 경로일 가능성이 높다.
+
+       주의: 아래 IP들은 하드코딩된 값이라 인스턴스가 재생성되면(user_data_replace_on_change)
+       바뀔 수 있다. 최신값 확인 방법:
+         - 앱 서버 private IP: 매니저에서 `/var/ossec/bin/agent_control -l` (에이전트 이름 ip-10-0-1-xxx)
+         - Wazuh 매니저 private IP: 매니저에서 `hostname -I`
+         - RDS private IP: 같은 VPC 내부에서 RDS 엔드포인트를 dig/getent로 조회 (AWS 사설 DNS가 사설 IP로 응답)
+       또한 443을 통짜로 허용하고 있어서, 공격자가 C2 리시버를 8080이 아니라 443으로 띄우면 이 룰은
+       못 잡는다(포트 기반 근사치의 한계). 더 확실하게 하려면 S3 VPC 게이트움 엔드포인트를 붙여서
+       S3 트래픽을 고정 prefix-list로 분리하는 방향을 고려할 것. -->
+  <rule id="100055" level="10">
+    <if_sid>100053</if_sid>
+    <field name="aws.srcaddr">^10\.0\.1\.131$</field>
+    <field name="aws.dstaddr" type="pcre2" negate="yes">^(10\.0\.2\.65|10\.0\.1\.76)$</field>
+    <field name="aws.dstport" type="pcre2" negate="yes">^(443|80|53|5432|1514|1515)$</field>
+    <description>Hospital app server egress to unexpected destination/port (possible exfiltration to unauthorized host): $(aws.dstaddr):$(aws.dstport)</description>
+    <mitre>
+      <id>T1041</id>
+    </mitre>
+    <group>vpcflow,exfil,egress_anomaly,</group>
   </rule>
 
 </group>
