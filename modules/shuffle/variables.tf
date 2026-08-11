@@ -52,3 +52,21 @@ variable "shuffle_opensearch_password" {
   type        = string
   sensitive   = true
 }
+
+variable "discord_webhook_url" {
+  description = "Discord 웹훅 URL(시크릿). bootstrap-import.sh가 워크플로 import 시 Discord 노드 url에 주입. 비우면 주입 건너뜀."
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "vpc_cidr" {
+  description = "VPC CIDR. 3001/3443을 내부(Wazuh 웹훅)에서만 열기 위해 사용."
+  type        = string
+}
+
+variable "admin_cidr" {
+  description = "대시보드 접속 허용 관리자 IP CIDR. 빈 값이면 외부 접속 규칙을 추가하지 않음."
+  type        = string
+  default     = ""
+}

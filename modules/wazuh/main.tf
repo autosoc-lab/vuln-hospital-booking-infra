@@ -253,10 +253,7 @@ resource "aws_instance" "wazuh" {
     aws s3 cp "s3://${var.log_bucket_name}/wazuh-rules/vuln_hospital_ssh_compromise.xml" /var/ossec/etc/rules/vuln_hospital_ssh_compromise.xml
     aws s3 cp "s3://${var.log_bucket_name}/wazuh-rules/vuln_hospital_decoders.xml" /var/ossec/etc/decoders/vuln_hospital_decoders.xml
 
-    # Shuffle SOAR 연동 스크립트 설치. <integration> 블록은 아직 넣지 않는다 — Shuffle
-    # 워크플로의 webhook URL을 알아야 하는데, 그건 Shuffle을 배포하고 워크플로를 만든
-    # 뒤에야 정해지기 때문. 배포 후 이 EC2에서 enable-shuffle-integration.sh를 실행해
-    # 켠다 (vuln-hospital-booking-soar/README.md 참고).
+    # Shuffle SOAR 연동 스크립트 설치.
     aws s3 cp "s3://${var.log_bucket_name}/wazuh-rules/custom-shuffle" /var/ossec/integrations/custom-shuffle
     aws s3 cp "s3://${var.log_bucket_name}/wazuh-rules/custom-shuffle.py" /var/ossec/integrations/custom-shuffle.py
     chown root:wazuh /var/ossec/integrations/custom-shuffle /var/ossec/integrations/custom-shuffle.py
@@ -267,6 +264,15 @@ resource "aws_instance" "wazuh" {
     chmod 750 /opt/soar-integration/enable-shuffle-integration.sh
 
     systemctl restart wazuh-manager
+
+    # Shuffle 웹훅 <integration> 자동 등록.
+    # Shuffle EC2는 EIP라 IP가 고정이고, 웹훅 hook id는 워크플로 JSON의 트리거 id로
+    # 고정된다(bootstrap-import.sh가 그 id로 웹훅을 start). 따라서 URL 전체를 배포
+    # 시점에 미리 조립할 수 있어, 사람이 SSH로 켤 필요 없이 부팅 때 자동 등록한다.
+    # (Shuffle이 아직 안 떠 있어도 config는 먼저 등록되고, Shuffle이 뜨면 알림이 흐른다.)
+    /opt/soar-integration/enable-shuffle-integration.sh \
+      "http://${var.shuffle_private_ip}:3001/api/v1/hooks/webhook_${var.shuffle_webhook_hook_id}" \
+      ${var.shuffle_integration_level} || true
   EOF
 
   tags = merge(var.common_tags, {

@@ -45,11 +45,13 @@ module "wazuh" {
   log_bucket_name       = module.security_monitoring.log_bucket_name
   log_bucket_arn        = module.security_monitoring.log_bucket_arn
   wazuh_version         = var.wazuh_version
+  # Shuffle EIP를 넘겨서 wazuh가 부팅 때 웹훅 <integration>을 자동 등록하게 함
+  shuffle_private_ip    = module.shuffle.private_ip
 }
 
 # 4. Shuffle SOAR 계층 — Wazuh 알림을 받아 대응 워크플로를 실행하는 자동화 서버
-# wazuh 모듈보다 먼저 생성될 필요는 없지만, wazuh EC2의 integration 스크립트가
-# 이 서버의 웹훅 URL을 필요로 하므로 통상 wazuh -> shuffle 순으로 값을 채워나간다.
+# shuffle의 EIP(public_ip)를 wazuh 모듈로 넘겨서, wazuh가 부팅 때 웹훅 <integration>을
+# 자동 등록한다. 이 의존성 때문에 shuffle(EIP) -> wazuh 순으로 생성된다.
 module "shuffle" {
   source = "./modules/shuffle"
 
@@ -63,6 +65,9 @@ module "shuffle" {
   shuffle_admin_password      = var.shuffle_admin_password
   shuffle_encryption_modifier = var.shuffle_encryption_modifier
   shuffle_opensearch_password = var.shuffle_opensearch_password
+  discord_webhook_url         = var.discord_webhook_url
+  vpc_cidr                    = module.networking.vpc_cidr
+  admin_cidr                  = var.admin_cidr
 }
 
 # 5. C2/수집 서버 — 공격자 소유로 가정하는 독립 EC2 (RCE/SSRF 실습에서 탈취 데이터를 받는 쪽)

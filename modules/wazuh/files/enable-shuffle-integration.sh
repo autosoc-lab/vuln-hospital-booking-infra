@@ -37,7 +37,10 @@ cat > /tmp/shuffle_integration_block.xml <<XML
   </integration>
 XML
 
-sed -i '/<ossec_config>/r /tmp/shuffle_integration_block.xml' "$OSSEC_CONF"
+# 주의: sed '/re/r file' 은 매칭되는 모든 줄 뒤에 삽입한다. ossec.conf에는 <ossec_config>
+# 태그가 여러 개 있을 수 있어서, 그러면 integration 블록이 중복 삽입된다(= 알림 중복 전송).
+# 그래서 awk로 '첫 번째 <ossec_config> 뒤에만' 한 번 삽입한다.
+awk 'BEGIN{done=0} {print} /<ossec_config>/ && !done {while((getline l < "/tmp/shuffle_integration_block.xml")>0) print l; close("/tmp/shuffle_integration_block.xml"); done=1}' "$OSSEC_CONF" > "$OSSEC_CONF.tmp" && mv "$OSSEC_CONF.tmp" "$OSSEC_CONF"
 rm -f /tmp/shuffle_integration_block.xml
 
 systemctl restart wazuh-manager

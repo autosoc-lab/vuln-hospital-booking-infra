@@ -9,11 +9,19 @@ data "aws_ami" "ubuntu" {
   }
 }
 
+# admin_cidr에 마스크(/32 등)가 없으면 단일 IP로 보고 /32를 자동으로 붙인다.
+# (사용자가 "1.2.3.4"만 넣어도 "1.2.3.4/32"로 처리)
+locals {
+  admin_cidr_norm = var.admin_cidr == "" ? "" : (
+    length(regexall("/", var.admin_cidr)) > 0 ? var.admin_cidr : "${var.admin_cidr}/32"
+  )
+}
+
 # --- 보안그룹: Shuffle SOAR용 ---
 # INTENTIONALLY PERMISSIVE - FOR LAB USE ONLY
-# 대시보드/웹훅(3001)은 실습 편의를 위해 0.0.0.0/0으로 개방 (wazuh 모듈과 동일 패턴).
-# 이렇게 열어야 브라우저로 워크플로를 만들면서 동시에 Wazuh가 보내는 웹훅도 같은
-# 포트로 받을 수 있다. 운영 환경이라면 관리자 IP + wazuh SG로 제한할 것.
+# 3001/3443은 0.0.0.0/0으로 열지 않는다. 웹훅은 Wazuh가 VPC 내부(사설IP)로 보내므로
+# vpc_cidr만 허용하면 되고, 대시보드는 관리자 IP(admin_cidr)만 허용한다. 이렇게 하면
+# git에 웹훅 hook id가 있어도 외부에서 위조 POST를 보낼 수 없다(외부 도달 자체가 차단).
 resource "aws_security_group" "shuffle" {
   name_prefix = "${var.project_name}-shuffle-sg-"
   description = "Shuffle SOAR frontend/webhook"
@@ -32,19 +40,19 @@ resource "aws_security_group" "shuffle" {
   }
 
   ingress {
-    description = "Shuffle dashboard / webhook intake (HTTP)"
+    description = "Shuffle HTTP - VPC internal (Wazuh webhook) + admin IP (dashboard)"
     from_port   = 3001
     to_port     = 3001
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    cidr_blocks = compact([var.vpc_cidr, local.admin_cidr_norm])
   }
 
   ingress {
-    description = "Shuffle dashboard / webhook intake (HTTPS)"
+    description = "Shuffle HTTPS - VPC internal + admin IP"
     from_port   = 3443
     to_port     = 3443
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    cidr_blocks = compact([var.vpc_cidr, local.admin_cidr_norm])
   }
 
   egress {
@@ -93,7 +101,7 @@ resource "aws_iam_instance_profile" "shuffle_ec2" {
 # --- Shuffle SOAR (frontend + backend + orborus + opensearch, docker compose 단일 노드) ---
 resource "aws_instance" "shuffle" {
   ami                         = data.aws_ami.ubuntu.id
-  instance_type               = "t3.medium"
+  instance_type               = "t3.small"
   subnet_id                   = var.public_subnet_id
   vpc_security_group_ids      = [aws_security_group.shuffle.id]
   associate_public_ip_address = true
@@ -111,7 +119,7 @@ resource "aws_instance" "shuffle" {
     #!/bin/bash
     set -e
 
-    # t3.medium(4GB RAM)에서 opensearch + 나머지 컨테이너가 안정적으로 뜨도록 스왑 추가
+    # t3.small(2GB RAM)에서 opensearch + 나머지 컨테이너가 뜨도록 스왑 2G 추가 (총 4GB)
     fallocate -l 2G /swapfile
     chmod 600 /swapfile
     mkswap /swapfile
@@ -134,16 +142,28 @@ resource "aws_instance" "shuffle" {
     # IMDSv2 토큰 기반 조회 (계정이 IMDSv2를 강제하는 경우에도 동작)
     TOKEN=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
     PUBLIC_IP=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/public-ipv4)
+    # orborus/worker가 backend에 도달할 때 쓰는 호스트. 컨테이너 기본값(shuffle-backend)으로
+    # 두면 swarm worker가 backend를 못 찾아 워크플로가 EXECUTING에서 멈춘다 → 사설IP로 고정.
+    PRIVATE_IP=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/local-ipv4)
 
     sed -i "s|^BASE_URL=.*|BASE_URL=http://$PUBLIC_IP:5001|" .env
     sed -i "s|^SSO_REDIRECT_URL=.*|SSO_REDIRECT_URL=http://$PUBLIC_IP:3001|" .env
+    sed -i "s|^OUTER_HOSTNAME=.*|OUTER_HOSTNAME=$PRIVATE_IP|" .env
     sed -i "s|^SHUFFLE_ENCRYPTION_MODIFIER=.*|SHUFFLE_ENCRYPTION_MODIFIER=${var.shuffle_encryption_modifier}|" .env
     sed -i "s|^SHUFFLE_OPENSEARCH_PASSWORD=.*|SHUFFLE_OPENSEARCH_PASSWORD=${var.shuffle_opensearch_password}|" .env
     sed -i "s|^OPENSEARCH_INITIAL_ADMIN_PASSWORD=.*|OPENSEARCH_INITIAL_ADMIN_PASSWORD=${var.shuffle_opensearch_password}|" .env
     sed -i "s|^SHUFFLE_DEFAULT_USERNAME=.*|SHUFFLE_DEFAULT_USERNAME=${var.shuffle_admin_username}|" .env
     sed -i "s|^SHUFFLE_DEFAULT_PASSWORD=.*|SHUFFLE_DEFAULT_PASSWORD=${var.shuffle_admin_password}|" .env
 
+    # Discord 웹훅 URL을 .env에 추가 → bootstrap-import.sh가 워크플로의 Discord url에 주입.
+    # .env.example엔 없는 키라 append. 빈 값이면 bootstrap이 주입을 건너뛴다.
+    echo "DISCORD_WEBHOOK_URL=${var.discord_webhook_url}" >> .env
+
     docker compose up -d
+
+    # 워크플로 자동 복원 (재배포 시 workflows/*.json 을 Shuffle 에 import).
+    # 실패해도 부팅은 계속됨 — 그 경우 Shuffle UI(Workflows -> Import)로 수동 복원.
+    bash /opt/soar/bootstrap-import.sh >> /var/log/shuffle-bootstrap.log 2>&1 || true
   EOF
 
   tags = merge(var.common_tags, {

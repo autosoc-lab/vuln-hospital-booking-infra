@@ -3,6 +3,11 @@ output "vpc_id" {
   value       = aws_vpc.main.id
 }
 
+output "vpc_cidr" {
+  description = "VPC CIDR (내부 통신 허용 SG 규칙에 사용)"
+  value       = aws_vpc.main.cidr_block
+}
+
 output "public_subnet_id" {
   description = "Public subnet ID"
   value       = aws_subnet.public.id

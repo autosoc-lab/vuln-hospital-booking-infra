@@ -42,7 +42,15 @@ def main(args):
     debug_enabled = len(args) > 4 and args[4] == "debug"
 
     alert_file_location = args[1]
-    hook_url = args[3]
+
+    # Wazuh 버전에 따라 integrator가 넘기는 인자 순서/개수가 달라진다(예: options 블록이
+    # 끼면 hook_url이 argv[3]가 아니라 뒤로 밀리고, argv[3]에 '10' 같은 숫자 옵션이 들어와
+    # 'Invalid URL 10' 에러가 났다). 위치로 고정하지 말고 http(s):// 로 시작하는 인자를
+    # 찾아 hook_url로 쓴다.
+    hook_url = next((a for a in args[1:] if a.startswith("http")), None)
+    if not hook_url:
+        log("hook_url을 인자에서 찾지 못함 args={}".format(args[1:]))
+        return
 
     with open(alert_file_location) as f:
         alert_json = json.loads(f.read())
