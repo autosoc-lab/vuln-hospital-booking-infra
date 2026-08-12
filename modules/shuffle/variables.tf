@@ -70,3 +70,20 @@ variable "admin_cidr" {
   type        = string
   default     = ""
 }
+
+# --- 2단계 자동조치용 ---
+
+variable "documents_bucket_arn" {
+  description = "문서 저장용 S3 버킷 ARN. rule 100031(lifecycle 자동삭제 설정) 발생 시 Shuffle이 lifecycle을 원복하는 데 필요."
+  type        = string
+}
+
+variable "app_ec2_role_arn" {
+  description = "앱 EC2 IAM role ARN. rule 100014(SSRF -> IMDS 크리덴셜 탈취 확증) 발생 시 Shuffle이 이 role의 활성 세션을 revoke하는 데 필요."
+  type        = string
+}
+
+variable "app_ec2_role_name" {
+  description = "앱 EC2 IAM role 이름. iam:PutRolePolicy/DeleteRolePolicy 호출 대상 지정에 필요."
+  type        = string
+}

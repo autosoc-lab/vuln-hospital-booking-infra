@@ -139,9 +139,17 @@ resource "aws_iam_instance_profile" "wazuh_ec2" {
   role = aws_iam_role.wazuh_ec2.name
 }
 
-# vuln_hospital_ssh_compromise.xml/디코더는 EC2 user_data 16KB 한도를 넘어서 직접 임베드할 수 없다.
-# 이미 CloudTrail/VPC Flow Logs가 쌓이는 로그 버킷에 별도 prefix로 얹어두고, wazuh EC2 역할이
-# 이미 그 버킷 전체에 대해 가진 s3:GetObject/ListBucket 권한(wazuh_logs_read)을 그대로 재사용한다.
+# local_rules.xml/vuln_hospital_ssh_compromise.xml/디코더는 EC2 user_data 16KB 한도를 넘어서
+# 직접 임베드할 수 없다. 이미 CloudTrail/VPC Flow Logs가 쌓이는 로그 버킷에 별도 prefix로
+# 얹어두고, wazuh EC2 역할이 이미 그 버킷 전체에 대해 가진 s3:GetObject/ListBucket 권한
+# (wazuh_logs_read)을 그대로 재사용한다.
+resource "aws_s3_object" "hospital_local_rules" {
+  bucket  = var.log_bucket_name
+  key     = "wazuh-rules/local_rules.xml"
+  content = file("${path.module}/files/local_rules.xml")
+  etag    = filemd5("${path.module}/files/local_rules.xml")
+}
+
 resource "aws_s3_object" "hospital_ssh_compromise_rules" {
   bucket  = var.log_bucket_name
   key     = "wazuh-rules/vuln_hospital_ssh_compromise.xml"
@@ -195,6 +203,7 @@ resource "aws_instance" "wazuh" {
   user_data_replace_on_change = true
   # S3에 룰/디코더/integration 파일이 먼저 올라가 있어야 user_data의 aws s3 cp가 성공한다
   depends_on = [
+    aws_s3_object.hospital_local_rules,
     aws_s3_object.hospital_ssh_compromise_rules,
     aws_s3_object.hospital_decoders,
     aws_s3_object.shuffle_integration_wrapper,
@@ -239,17 +248,14 @@ resource "aws_instance" "wazuh" {
 
     sed -i '/<ossec_config>/r /tmp/wodle_block.xml' /var/ossec/etc/ossec.conf
 
-    # SSRF -> IMDSv1 -> S3 sync(exfil) -> SSE-C 재암호화 -> lifecycle 삭제 체인 탐지용 커스텀 룰.
-    # GuardDuty가 이미 잡아주는 "탈취한 임시자격증명이 EC2 밖에서 쓰임"(InstanceCredentialExfiltration)
-    # 단계는 별도 룰 없이 기본 aws 룰셋으로 커버되므로 여기서는 다루지 않음.
-    cat > /var/ossec/etc/rules/local_rules.xml <<'LOCAL_RULES_XML'
-    ${file("${path.module}/files/local_rules.xml")}
-    LOCAL_RULES_XML
-
-    # 유출 SSH 키 기반 EC2 침해, 백업 헬퍼 권한 상승, DB 수집/반출 흐름 탐지용 룰셋.
-    # 이 파일(+디코더)은 EC2 user_data의 16KB 한도를 넘어서 직접 임베드할 수 없어 S3에 올려두고 받아온다.
+    # SSRF -> IMDSv1 -> S3 sync(exfil) -> SSE-C 재암호화 -> lifecycle 삭제 체인 탐지용 커스텀 룰
+    # + 유출 SSH 키 기반 EC2 침해/권한상승/데이터반출 룰셋. GuardDuty가 이미 잡아주는
+    # "탈취한 임시자격증명이 EC2 밖에서 쓰임"(InstanceCredentialExfiltration) 단계는 별도
+    # 룰 없이 기본 aws 룰셋으로 커버되므로 여기서는 다루지 않음.
+    # 이 파일들(+디코더)은 EC2 user_data의 16KB 한도를 넘어서 직접 임베드할 수 없어 S3에 올려두고 받아온다.
     apt-get update -y
     apt-get install -y awscli
+    aws s3 cp "s3://${var.log_bucket_name}/wazuh-rules/local_rules.xml" /var/ossec/etc/rules/local_rules.xml
     aws s3 cp "s3://${var.log_bucket_name}/wazuh-rules/vuln_hospital_ssh_compromise.xml" /var/ossec/etc/rules/vuln_hospital_ssh_compromise.xml
     aws s3 cp "s3://${var.log_bucket_name}/wazuh-rules/vuln_hospital_decoders.xml" /var/ossec/etc/decoders/vuln_hospital_decoders.xml
 

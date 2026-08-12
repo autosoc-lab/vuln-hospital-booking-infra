@@ -13,6 +13,21 @@ output "documents_bucket_name" {
   value       = aws_s3_bucket.documents.bucket
 }
 
+output "documents_bucket_arn" {
+  description = "문서 저장용 S3 버킷 ARN (Shuffle의 lifecycle 원복 자동조치 대상)"
+  value       = aws_s3_bucket.documents.arn
+}
+
+output "ec2_ssm_role_arn" {
+  description = "앱 EC2 IAM role ARN (Shuffle이 탈취된 세션을 revoke할 대상)"
+  value       = aws_iam_role.ec2_ssm.arn
+}
+
+output "ec2_ssm_role_name" {
+  description = "앱 EC2 IAM role 이름 (iam:PutRolePolicy 호출 시 필요)"
+  value       = aws_iam_role.ec2_ssm.name
+}
+
 output "leaked_s3_key_access_key_id" {
   description = "SSE-C 실습용 '유출된' IAM 사용자 Access Key ID"
   value       = aws_iam_access_key.leaked_s3_key.id

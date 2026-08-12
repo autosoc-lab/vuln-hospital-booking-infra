@@ -113,6 +113,24 @@
     <group>s3_ransomware,</group>
   </rule>
 
+  <!-- 100032: 상관분석 확증. 100031은 정상 운영(문서 자동 보관/만료 정책 설정)으로도
+       뜰 수 있어 level을 낮게(10) 유지하는데, 같은 버킷에서 SSE-C 재암호화(100030)가
+       먼저 있었고 짧은 시간 안에 lifecycle 변경(100031)까지 겹치면 정상 운영에서는
+       나올 수 없는 조합이라 확실한 랜섬웨어 체인으로 본다. 이 로그는 100031이 아니라
+       100032로 발화한다(같은 트리에서 더 깊은 룰이 우선). timeframe 600초는 스크립트로
+       여러 객체를 순차 재암호화한 뒤 바로 lifecycle을 설정하는 통상적인 소요시간을 감안. -->
+  <rule id="100032" level="15" timeframe="600">
+    <if_sid>100031</if_sid>
+    <if_matched_sid>100030</if_matched_sid>
+    <same_field>aws.requestParameters.bucketName</same_field>
+    <description>SSE-C 랜섬웨어 체인 확증: 같은 버킷에서 SSE-C 재암호화 직후 lifecycle 자동삭제 설정 - 정상 운영에서는 나올 수 없는 조합</description>
+    <mitre>
+      <id>T1486</id>
+      <id>T1485</id>
+    </mitre>
+    <group>s3_ransomware,attack_scenario,critical,</group>
+  </rule>
+
   <!-- ============================================================ -->
   <!-- CloudTrail/VPC Flow Logs 로깅 비활성화 탐지 (Defense Evasion)   -->
   <!-- 공격자가 침투 후 흔적을 지우려고 로깅을 끄거나 로그를 지우는 단계 -->

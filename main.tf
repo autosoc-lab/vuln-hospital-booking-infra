@@ -68,6 +68,13 @@ module "shuffle" {
   discord_webhook_url         = var.discord_webhook_url
   vpc_cidr                    = module.networking.vpc_cidr
   admin_cidr                  = var.admin_cidr
+
+  # module.app 의 output을 직접 참조하면 shuffle -> app -> wazuh(shuffle_private_ip 필요) ->
+  # shuffle 순환 의존성이 생긴다. app 모듈의 문서 버킷/EC2 role 이름은 project_name/account_id로
+  # 결정되는 고정 패턴(modules/app/main.tf 참고)이라 여기서 직접 조립해 순환을 피한다.
+  documents_bucket_arn = "arn:aws:s3:::${var.project_name}-documents-${local.account_id}"
+  app_ec2_role_arn     = "arn:aws:iam::${local.account_id}:role/${var.project_name}-ec2-ssm-role"
+  app_ec2_role_name    = "${var.project_name}-ec2-ssm-role"
 }
 
 # 5. C2/수집 서버 — 공격자 소유로 가정하는 독립 EC2 (RCE/SSRF 실습에서 탈취 데이터를 받는 쪽)

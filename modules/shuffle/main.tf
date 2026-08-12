@@ -93,6 +93,49 @@ resource "aws_iam_role_policy_attachment" "shuffle_ssm" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
+# --- 2단계 자동조치 (완전자동): rule 100031 (문서 버킷 lifecycle 자동삭제 설정 변경 —
+# SSE-C 랜섬웨어의 복구불능화 단계) 발생 시, Shuffle이 즉시 lifecycle을 원복(삭제)한다.
+# 되돌리기 쉽고 부작용이 거의 없어 사람 승인 없이 자동화하는 유일한 조치.
+# "SOAR-100031" 브랜치 설계는 vuln-hospital-booking-soar/PLAYBOOKS.md 참고.
+resource "aws_iam_role_policy" "shuffle_lifecycle_revert" {
+  name = "${var.project_name}-shuffle-lifecycle-revert-policy"
+  role = aws_iam_role.shuffle_ec2.name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["s3:GetLifecycleConfiguration", "s3:PutLifecycleConfiguration"]
+        Resource = var.documents_bucket_arn
+      }
+    ]
+  })
+}
+
+# --- 2단계 자동조치 (사람 승인형): rule 100014 (SSRF -> EC2 IMDS 크리덴셜 탈취 확증)
+# 발생 시, 승인을 거쳐 앱 EC2 role의 활성 STS 세션을 강제 무효화한다.
+# 탈취되는 게 IAM 유저 액세스키가 아니라 인스턴스 프로필 임시 세션이라
+# iam:UpdateAccessKey로는 무효화가 안 되고, aws:TokenIssueTime 조건부
+# Deny-all 인라인 정책을 붙이는 방식(AWS 콘솔 "Revoke active sessions"와 동일
+# 메커니즘)을 써야 한다. 서비스 중단을 유발할 수 있는 조치라 사람 승인 필수.
+# DeleteRolePolicy는 사고 종료 후 revoke 정책을 제거해 정상화하는 데 필요.
+resource "aws_iam_role_policy" "shuffle_revoke_session" {
+  name = "${var.project_name}-shuffle-revoke-session-policy"
+  role = aws_iam_role.shuffle_ec2.name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["iam:PutRolePolicy", "iam:DeleteRolePolicy", "iam:GetRolePolicy"]
+        Resource = var.app_ec2_role_arn
+      }
+    ]
+  })
+}
+
 resource "aws_iam_instance_profile" "shuffle_ec2" {
   name = "${var.project_name}-shuffle-ec2-profile"
   role = aws_iam_role.shuffle_ec2.name
