@@ -9,12 +9,16 @@ data "aws_ami" "ubuntu" {
   }
 }
 
-# admin_cidr에 마스크(/32 등)가 없으면 단일 IP로 보고 /32를 자동으로 붙인다.
+# admin_cidr/admin_cidrs에 마스크(/32 등)가 없으면 단일 IP로 보고 /32를 자동으로 붙인다.
 # (사용자가 "1.2.3.4"만 넣어도 "1.2.3.4/32"로 처리)
 locals {
   admin_cidr_norm = var.admin_cidr == "" ? "" : (
     length(regexall("/", var.admin_cidr)) > 0 ? var.admin_cidr : "${var.admin_cidr}/32"
   )
+  admin_cidrs_norm = [
+    for cidr in compact(concat([local.admin_cidr_norm], var.admin_cidrs)) :
+    length(regexall("/", cidr)) > 0 ? cidr : "${cidr}/32"
+  ]
   app_instance_name      = "${var.project_name}-app-server"
   leaked_s3_key_user     = "${var.project_name}-leaked-s3-key"
   leaked_s3_key_user_arn = "arn:aws:iam::${var.account_id}:user/${local.leaked_s3_key_user}"
@@ -25,7 +29,7 @@ locals {
 # --- 보안그룹: Shuffle SOAR용 ---
 # INTENTIONALLY PERMISSIVE - FOR LAB USE ONLY
 # 3001/3443은 0.0.0.0/0으로 열지 않는다. 웹훅은 Wazuh가 VPC 내부(사설IP)로 보내므로
-# vpc_cidr만 허용하면 되고, 대시보드는 관리자 IP(admin_cidr)만 허용한다. 이렇게 하면
+# vpc_cidr만 허용하면 되고, 대시보드는 관리자 IP(admin_cidrs)만 허용한다. 이렇게 하면
 # git에 웹훅 hook id가 있어도 외부에서 위조 POST를 보낼 수 없다(외부 도달 자체가 차단).
 resource "aws_security_group" "shuffle" {
   name_prefix = "${var.project_name}-shuffle-sg-"
@@ -49,7 +53,7 @@ resource "aws_security_group" "shuffle" {
     from_port   = 3001
     to_port     = 3001
     protocol    = "tcp"
-    cidr_blocks = compact([var.vpc_cidr, local.admin_cidr_norm])
+    cidr_blocks = concat([var.vpc_cidr], local.admin_cidrs_norm)
   }
 
   ingress {
@@ -57,7 +61,7 @@ resource "aws_security_group" "shuffle" {
     from_port   = 3443
     to_port     = 3443
     protocol    = "tcp"
-    cidr_blocks = compact([var.vpc_cidr, local.admin_cidr_norm])
+    cidr_blocks = concat([var.vpc_cidr], local.admin_cidrs_norm)
   }
 
   ingress {

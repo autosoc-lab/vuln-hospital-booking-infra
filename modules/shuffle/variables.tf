@@ -66,9 +66,15 @@ variable "vpc_cidr" {
 }
 
 variable "admin_cidr" {
-  description = "대시보드 접속 허용 관리자 IP CIDR. 빈 값이면 외부 접속 규칙을 추가하지 않음."
+  description = "대시보드 접속 허용 관리자 IP CIDR 1개. 하위 호환용이며 여러 개는 admin_cidrs 사용."
   type        = string
   default     = ""
+}
+
+variable "admin_cidrs" {
+  description = "대시보드 접속 허용 관리자 IP CIDR 목록. 빈 목록이면 외부 접속 규칙을 추가하지 않음."
+  type        = list(string)
+  default     = []
 }
 
 variable "account_id" {

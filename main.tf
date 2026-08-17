@@ -69,6 +69,7 @@ module "shuffle" {
   discord_webhook_url          = var.discord_webhook_url
   vpc_cidr                     = module.networking.vpc_cidr
   admin_cidr                   = var.admin_cidr
+  admin_cidrs                  = var.admin_cidrs
   app_security_group_id        = module.networking.ec2_security_group_id
   quarantine_security_group_id = module.networking.ec2_quarantine_security_group_id
 }
