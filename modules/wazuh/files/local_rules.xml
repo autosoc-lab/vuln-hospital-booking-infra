@@ -131,6 +131,42 @@
     <group>s3_ransomware,attack_scenario,critical,</group>
   </rule>
 
+  <!-- 100033: SSE-C 키로 조회(반출). 정상 앱은 SSE-C 커스텀 키를 모르므로
+       GetObject에 x-amz-server-side-encryption-customer-algorithm 헤더가 실리는
+       경우는 없다 - 공격자 본인이 재암호화한 객체를 자기 키로 다시 읽어가는
+       경우(lifecycle 자동삭제 전 사본 확보, 이중공갈용)에만 발화하는 단일 이벤트
+       확정 신호. 100020/100021(볼륨 기반 대량 다운로드 탐지)과 달리 속도에
+       관계없이 이 패턴 자체로 확정된다. -->
+  <rule id="100033" level="13">
+    <if_sid>80200</if_sid>
+    <field name="aws.eventName">^GetObject$</field>
+    <field name="aws.requestParameters.bucketName" type="pcre2">-documents-</field>
+    <field name="aws.requestParameters.x-amz-server-side-encryption-customer-algorithm" type="pcre2">.+</field>
+    <description>SSE-C 커스텀 키로 문서 버킷 객체 조회 - 공격자가 자신이 재암호화한 사본을 반출하는 정황(Codefinger 이중공갈 패턴)</description>
+    <mitre>
+      <id>T1005</id>
+      <id>T1486</id>
+    </mitre>
+    <group>s3_ransomware,s3_exfil,</group>
+  </rule>
+
+  <!-- 100034: 전체 체인 확증. 100032(재암호화+lifecycle 확증)가 같은 버킷에서
+       이미 떴고, 그 뒤 SSE-C 키로 조회(100033)까지 일어나면 재암호화 -> 삭제
+       예약 -> 반출까지 랜섬웨어 공격의 전 단계가 완결된 것으로 본다.
+       timeframe은 100032와 동일하게 600초. -->
+  <rule id="100034" level="15" timeframe="600">
+    <if_sid>100033</if_sid>
+    <if_matched_sid>100032</if_matched_sid>
+    <same_field>aws.requestParameters.bucketName</same_field>
+    <description>SSE-C 랜섬웨어 체인 완전 확증: 재암호화 -> lifecycle 자동삭제 설정 -> SSE-C 키로 반출까지 전 단계 완료</description>
+    <mitre>
+      <id>T1486</id>
+      <id>T1485</id>
+      <id>T1005</id>
+    </mitre>
+    <group>s3_ransomware,attack_scenario,critical,</group>
+  </rule>
+
   <!-- ============================================================ -->
   <!-- CloudTrail/VPC Flow Logs 로깅 비활성화 탐지 (Defense Evasion)   -->
   <!-- 공격자가 침투 후 흔적을 지우려고 로깅을 끄거나 로그를 지우는 단계 -->
