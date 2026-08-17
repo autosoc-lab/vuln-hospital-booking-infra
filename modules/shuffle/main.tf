@@ -178,6 +178,40 @@ resource "aws_iam_role_policy" "shuffle_soar_response" {
   })
 }
 
+resource "aws_iam_role_policy" "shuffle_lifecycle_revert" {
+  name = "${var.project_name}-shuffle-lifecycle-revert-policy"
+  role = aws_iam_role.shuffle_ec2.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid      = "RevertLifecycleOnDocumentsBucketOnly"
+        Effect   = "Allow"
+        Action   = ["s3:GetLifecycleConfiguration", "s3:PutLifecycleConfiguration"]
+        Resource = local.documents_bucket_arn
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy" "shuffle_revoke_session" {
+  name = "${var.project_name}-shuffle-revoke-session-policy"
+  role = aws_iam_role.shuffle_ec2.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid      = "RevokeSessionOnAppEc2RoleOnly"
+        Effect   = "Allow"
+        Action   = ["iam:PutRolePolicy", "iam:DeleteRolePolicy", "iam:GetRolePolicy"]
+        Resource = var.app_ec2_role_arn
+      }
+    ]
+  })
+}
+
 resource "aws_iam_instance_profile" "shuffle_ec2" {
   name = "${var.project_name}-shuffle-ec2-profile"
   role = aws_iam_role.shuffle_ec2.name
@@ -227,10 +261,16 @@ resource "aws_instance" "shuffle" {
     cat > /opt/soar/scripts/respond-ssh-compromise.sh <<'SOAR_RESPONSE_SCRIPT'
     ${file("${path.module}/files/respond-ssh-compromise.sh")}
     SOAR_RESPONSE_SCRIPT
+    cat > /opt/soar/scripts/respond-lifecycle-revert.sh <<'SOAR_LIFECYCLE_REVERT'
+    ${file("${path.module}/files/respond-lifecycle-revert.sh")}
+    SOAR_LIFECYCLE_REVERT
+    cat > /opt/soar/scripts/respond-session-revoke.sh <<'SOAR_SESSION_REVOKE'
+    ${file("${path.module}/files/respond-session-revoke.sh")}
+    SOAR_SESSION_REVOKE
     cat > /opt/soar/scripts/soar-response-api.py <<'SOAR_RESPONSE_API'
     ${file("${path.module}/files/soar-response-api.py")}
     SOAR_RESPONSE_API
-    chmod 755 /opt/soar/scripts/respond-ssh-compromise.sh /opt/soar/scripts/soar-response-api.py
+    chmod 755 /opt/soar/scripts/respond-ssh-compromise.sh /opt/soar/scripts/respond-lifecycle-revert.sh /opt/soar/scripts/respond-session-revoke.sh /opt/soar/scripts/soar-response-api.py
 
     mkdir -p shuffle-apps shuffle-files shuffle-database
     cp .env.example .env
@@ -259,6 +299,7 @@ resource "aws_instance" "shuffle" {
     echo "SOAR_QUARANTINE_SECURITY_GROUP_ID=${var.quarantine_security_group_id}" >> .env
     echo "SOAR_LEAKED_S3_KEY_USER_NAME=${local.leaked_s3_key_user}" >> .env
     echo "SOAR_DOCUMENTS_BUCKET=${local.documents_bucket_name}" >> .env
+    echo "SOAR_APP_EC2_ROLE_NAME=${var.app_ec2_role_name}" >> .env
     echo "SOAR_RESPONSE_API_URL=http://$PRIVATE_IP:8088/respond/ssh-compromise" >> .env
 
     cat > /etc/systemd/system/soar-response-api.service <<'SERVICE'

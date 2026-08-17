@@ -72,6 +72,8 @@ module "shuffle" {
   account_id                    = local.account_id
   app_security_group_id         = module.networking.ec2_security_group_id
   quarantine_security_group_id  = module.networking.ec2_quarantine_security_group_id
+  app_ec2_role_arn              = module.app.ec2_role_arn
+  app_ec2_role_name             = module.app.ec2_role_name
 }
 
 # 5. C2/수집 서버 — 공격자 소유로 가정하는 독립 EC2 (RCE/SSRF 실습에서 탈취 데이터를 받는 쪽)

@@ -23,15 +23,16 @@
     <group>ssrf,</group>
   </rule>
 
-  <!-- 100012: 실제 취약 엔드포인트(/documents/referral-link-preview,
-       /api/documents/referral-link-preview - app/routes/user_pages.py,
+  <!-- 100012: 실제 취약 엔드포인트(/documents/referral-attachment-import,
+       /api/documents/referral-attachment-import - 전원 접수 시 의뢰 병원이 제공한
+       의뢰서 원본 문서 URL을 가져오는 기능. app/routes/user_pages.py,
        app/routes/api.py 의 requests.get(url) 무검증 호출)로 좁혀 확증도를 높인 룰.
        100011의 두 조건(내부/메타데이터 목적지) + 알려진 취약 경로가 모두 맞아야
        발화하므로 다른 화면의 우연한 "url=" 파라미터로 인한 오탐을 줄인다. -->
   <rule id="100012" level="12">
     <if_sid>100011</if_sid>
-    <field name="path" type="pcre2">(?i)/documents/referral-link-preview$</field>
-    <description>SSRF exploit attempt against known-vulnerable referral-link-preview endpoint: $(query_string)</description>
+    <field name="path" type="pcre2">(?i)/documents/referral-attachment-import$</field>
+    <description>SSRF exploit attempt against known-vulnerable referral-attachment-import endpoint: $(query_string)</description>
     <mitre>
       <id>T1190</id>
     </mitre>
@@ -41,10 +42,15 @@
   <!-- 100013: EC2 IMDS IAM 임시 자격증명 조회 경로(iam/security-credentials/<role>)까지
        특정한 요청 - ssrf_steal_ec2_creds.sh 가 실제로 보내는 패턴과 일치.
        curl 의 G 옵션과 data urlencode 옵션으로 슬래시가 %2F 로 인코딩돼도 "security-credentials"
-       문자열 자체(하이픈/영문자만 구성)는 인코딩되지 않으므로 그대로 매칭된다. -->
+       문자열 자체(하이픈/영문자만 구성)는 인코딩되지 않으므로 그대로 매칭된다.
+       메타데이터 IP는 100011과 동일한 난독화 표기(16진수/10진수/8진수)까지 커버해야
+       한다 - WAF(ModSecurity CRS 931100)가 dotted-decimal IP(169.254.169.254 원문)를
+       ARGS:url에서 바로 차단하므로, 실제로 뚫고 들어오는 요청은 거의 항상 난독화된
+       형태다. 원문만 매칭하면 100011은 뜨는데 100013/100014는 침묵하는 사각지대가
+       생긴다(ssrf_steal_ec2_creds.sh도 이 이유로 0xa9fea9fe 표기를 쓴다). -->
   <rule id="100013" level="14">
     <if_sid>100012</if_sid>
-    <field name="query_string" type="pcre2">(?i)169\.254\.169\.254.*security-credentials</field>
+    <field name="query_string" type="pcre2">(?i)(169\.254\.169\.254|169\.254\.170\.2|2852039166|0x[aA]9[fF][eE][aA]9[fF][eE]|0251\.0376\.0251\.0376|::ffff:169\.254\.169\.254).*security-credentials</field>
     <description>SSRF -> EC2 IMDS IAM role credential theft attempt: $(query_string)</description>
     <mitre>
       <id>T1552.005</id>
@@ -86,12 +92,18 @@
     <group>s3_exfil,</group>
   </rule>
 
-  <!-- SSE-C 커스텀 키 재암호화 (Codefinger 랜섬웨어 패턴) -->
-  <rule id="100030" level="12">
+  <!-- SSE-C 커스텀 키 재암호화 (Codefinger 랜섬웨어 패턴).
+       PutObject뿐 아니라 CopyObject(자기 자신으로 셀프 카피 + 목적지 SSE-C 헤더)로도
+       같은 결과를 만들 수 있다 - 이 경우 공격자는 원본을 로컬로 내려받을 필요조차
+       없이 S3 서버 내부에서 재암호화가 끝나므로 오히려 더 흔히 쓰이는 방식이다.
+       CloudTrail은 이걸 eventName=PutObject가 아니라 별도로 CopyObject로 기록하므로
+       PutObject만 보면 이 경로를 완전히 놓친다. 목적지 암호화 헤더 필드명은 두
+       eventName 모두 동일(x-amz-server-side-encryption-customer-algorithm)하다. -->
+  <rule id="100030" level="13">
     <if_sid>80200</if_sid>
-    <field name="aws.eventName">^PutObject$</field>
+    <field name="aws.eventName" type="pcre2">^(PutObject|CopyObject)$</field>
     <field name="aws.requestParameters.x-amz-server-side-encryption-customer-algorithm" type="pcre2">.+</field>
-    <description>S3 object re-encrypted with SSE-C customer key - Codefinger ransomware pattern</description>
+    <description>S3 object re-encrypted with SSE-C customer key via $(aws.eventName) - Codefinger ransomware pattern</description>
     <mitre>
       <id>T1486</id>
     </mitre>
@@ -101,8 +113,13 @@
   <!-- 라이프사이클 정책 변경으로 자동삭제 설정 (복구 불능화).
        boto3 메서드명은 put_bucket_lifecycle_configuration이지만 CloudTrail
        eventName은 구버전 REST API 명칭인 PutBucketLifecycle로 기록된다
-       (lookup_events로 실제 호출 후 확인함). -->
-  <rule id="100031" level="10">
+       (lookup_events로 실제 호출 후 확인함).
+       level 12: Discord 일반 알림 구간(level>11)까지만 걸치도록 승격.
+       Shuffle "Wazuh Alert Router"의 Lifecycle_Revert 브랜치(100031/100032 ->
+       respond-lifecycle-revert.sh, delete-bucket-lifecycle)가 실제로 승인 없이
+       자동 실행된다 - vuln-hospital-booking-soar/workflows/Wazuh Alert Router.json,
+       vuln-hospital-booking-soar/playbook_ex.md 참고. -->
+  <rule id="100031" level="12">
     <if_sid>80200</if_sid>
     <field name="aws.eventName">^PutBucketLifecycle$</field>
     <field name="aws.requestParameters.bucketName" type="pcre2">-documents-</field>

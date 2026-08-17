@@ -91,3 +91,13 @@ variable "quarantine_security_group_id" {
   description = "침해 확증 시 앱 EC2에 적용할 격리 보안그룹 ID"
   type        = string
 }
+
+variable "app_ec2_role_arn" {
+  description = "앱 EC2 IAM role ARN - SSRF/SSE-C 자동조치(세션 revoke)에서 put_role_policy 대상"
+  type        = string
+}
+
+variable "app_ec2_role_name" {
+  description = "앱 EC2 IAM role 이름 - respond-session-revoke.sh가 aws iam put-role-policy --role-name에 사용"
+  type        = string
+}
