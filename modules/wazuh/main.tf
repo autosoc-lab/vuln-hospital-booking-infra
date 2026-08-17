@@ -156,6 +156,13 @@ resource "aws_s3_object" "hospital_decoders" {
   etag    = filemd5("${path.module}/files/vuln_hospital_decoders.xml")
 }
 
+resource "aws_s3_object" "hospital_local_rules" {
+  bucket  = var.log_bucket_name
+  key     = "wazuh-rules/local_rules.xml"
+  content = file("${path.module}/files/local_rules.xml")
+  etag    = filemd5("${path.module}/files/local_rules.xml")
+}
+
 # Wazuh -> Shuffle SOAR 연동용 custom integration 스크립트 + 활성화 헬퍼.
 # 같은 이유(16KB user_data 한도)로 S3에 얹어서 배포한다. 웹훅 hook id는 SOAR 저장소의
 # import 스크립트와 Terraform 변수에서 고정하므로 Wazuh 부팅 시 자동 등록된다.
@@ -195,6 +202,7 @@ resource "aws_instance" "wazuh" {
   depends_on = [
     aws_s3_object.hospital_ssh_compromise_rules,
     aws_s3_object.hospital_decoders,
+    aws_s3_object.hospital_local_rules,
     aws_s3_object.shuffle_integration_wrapper,
     aws_s3_object.shuffle_integration_script,
     aws_s3_object.shuffle_integration_enable_script,
@@ -237,17 +245,12 @@ resource "aws_instance" "wazuh" {
 
     sed -i '/<ossec_config>/r /tmp/wodle_block.xml' /var/ossec/etc/ossec.conf
 
-    # SSRF -> IMDSv1 -> S3 sync(exfil) -> SSE-C 재암호화 -> lifecycle 삭제 체인 탐지용 커스텀 룰.
-    # GuardDuty가 이미 잡아주는 "탈취한 임시자격증명이 EC2 밖에서 쓰임"(InstanceCredentialExfiltration)
-    # 단계는 별도 룰 없이 기본 aws 룰셋으로 커버되므로 여기서는 다루지 않음.
-    cat > /var/ossec/etc/rules/local_rules.xml <<'LOCAL_RULES_XML'
-    ${file("${path.module}/files/local_rules.xml")}
-    LOCAL_RULES_XML
-
-    # 유출 SSH 키 기반 EC2 침해, 백업 헬퍼 권한 상승, DB 수집/반출 흐름 탐지용 룰셋.
-    # 이 파일(+디코더)은 EC2 user_data의 16KB 한도를 넘어서 직접 임베드할 수 없어 S3에 올려두고 받아온다.
+    # SSRF/S3/로그변조/VPC Flow Logs 탐지용 local_rules와 유출 SSH 키 기반 EC2 침해,
+    # 백업 헬퍼 권한 상승, DB 수집/반출 흐름 탐지용 룰셋을 S3에서 받아온다.
+    # 룰 파일은 EC2 user_data의 16KB 한도를 넘기 쉬워 직접 임베드하지 않는다.
     apt-get update -y
     apt-get install -y awscli
+    aws s3 cp "s3://${var.log_bucket_name}/wazuh-rules/local_rules.xml" /var/ossec/etc/rules/local_rules.xml
     aws s3 cp "s3://${var.log_bucket_name}/wazuh-rules/vuln_hospital_ssh_compromise.xml" /var/ossec/etc/rules/vuln_hospital_ssh_compromise.xml
     aws s3 cp "s3://${var.log_bucket_name}/wazuh-rules/vuln_hospital_decoders.xml" /var/ossec/etc/decoders/vuln_hospital_decoders.xml
 
