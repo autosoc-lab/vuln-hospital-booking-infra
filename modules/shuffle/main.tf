@@ -124,10 +124,31 @@ resource "aws_iam_role_policy" "shuffle_soar_response" {
         Resource = "*"
       },
       {
-        Sid      = "QuarantineOnlyLabAppInstance"
+        Sid      = "QuarantineOnlyLabAppInstanceAttribute"
         Effect   = "Allow"
-        Action   = ["ec2:ModifyInstanceAttribute", "ec2:CreateTags"]
-        Resource = "*"
+        Action   = ["ec2:ModifyInstanceAttribute"]
+        Resource = "arn:aws:ec2:*:${var.account_id}:instance/*"
+        Condition = {
+          StringEquals = {
+            "ec2:ResourceTag/Project" = var.project_name
+            "ec2:ResourceTag/Name"    = local.app_instance_name
+          }
+        }
+      },
+      {
+        Sid    = "AttachOnlyLabResponseSecurityGroups"
+        Effect = "Allow"
+        Action = ["ec2:ModifyInstanceAttribute"]
+        Resource = [
+          "arn:aws:ec2:*:${var.account_id}:security-group/${var.app_security_group_id}",
+          "arn:aws:ec2:*:${var.account_id}:security-group/${var.quarantine_security_group_id}"
+        ]
+      },
+      {
+        Sid      = "TagOnlyLabAppInstance"
+        Effect   = "Allow"
+        Action   = ["ec2:CreateTags"]
+        Resource = "arn:aws:ec2:*:${var.account_id}:instance/*"
         Condition = {
           StringEquals = {
             "ec2:ResourceTag/Project" = var.project_name

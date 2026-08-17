@@ -55,13 +55,21 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         open(LOCK, "w").close()
-        with open("/tmp/soar-last-ssh-compromise-alert.json", "w") as f:
-            json.dump(alert, f, ensure_ascii=False, indent=2)
+        proc = None
+        try:
+            with open("/tmp/soar-last-ssh-compromise-alert.json", "w") as f:
+                json.dump(alert, f, ensure_ascii=False, indent=2)
 
-        proc = subprocess.run([SCRIPT], text=True, capture_output=True)
-        with open("/tmp/soar-last-ssh-compromise-response.log", "w") as f:
-            f.write(proc.stdout)
-            f.write(proc.stderr)
+            proc = subprocess.run([SCRIPT], text=True, capture_output=True)
+            with open("/tmp/soar-last-ssh-compromise-response.log", "w") as f:
+                f.write(proc.stdout)
+                f.write(proc.stderr)
+        finally:
+            if proc is None or proc.returncode != 0:
+                try:
+                    os.remove(LOCK)
+                except FileNotFoundError:
+                    pass
 
         self.send_response(200 if proc.returncode == 0 else 500)
         self.end_headers()
