@@ -23,7 +23,6 @@ import json
 import os
 import sys
 from datetime import datetime
-from urllib.parse import urlparse
 
 import requests
 
@@ -37,35 +36,6 @@ def log(msg):
             f.write("{} custom-shuffle: {}\n".format(now, msg))
     except OSError:
         pass
-
-
-def should_trigger_ssh_response(alert_json):
-    rule = alert_json.get("rule") or {}
-    rule_id = str(rule.get("id") or "")
-    level = int(rule.get("level") or 0)
-    groups = set(rule.get("groups") or [])
-    ssh_rule = rule_id.startswith("10017") or rule_id.startswith("10018")
-    if not ssh_rule and "hospital_ssh_compromise" not in groups:
-        return False
-    if level < 15:
-        return False
-    return rule_id in {"100174", "100179", "100180"}
-
-
-def post_response_api(hook_url, alert_json, headers, debug_enabled):
-    if not should_trigger_ssh_response(alert_json):
-        return
-
-    parsed = urlparse(hook_url)
-    if not parsed.hostname:
-        return
-    response_url = "{}://{}:8088/respond/ssh-compromise".format(parsed.scheme or "http", parsed.hostname)
-    try:
-        response = requests.post(response_url, headers=headers, data=json.dumps(alert_json), timeout=5, verify=False)
-        if debug_enabled or response.status_code >= 300:
-            log("POST {} -> {} {}".format(response_url, response.status_code, response.text[:500]))
-    except Exception as e:
-        log("response api error: {}".format(e))
 
 
 def main(args):
@@ -93,8 +63,6 @@ def main(args):
 
     if debug_enabled or response.status_code >= 300:
         log("POST {} -> {} {}".format(hook_url, response.status_code, response.text[:500]))
-
-    post_response_api(hook_url, alert_json, headers, debug_enabled)
 
 
 if __name__ == "__main__":

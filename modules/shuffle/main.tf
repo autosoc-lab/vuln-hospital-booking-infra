@@ -235,6 +235,7 @@ resource "aws_instance" "shuffle" {
     echo "SOAR_QUARANTINE_SECURITY_GROUP_ID=${var.quarantine_security_group_id}" >> .env
     echo "SOAR_LEAKED_S3_KEY_USER_NAME=${local.leaked_s3_key_user}" >> .env
     echo "SOAR_DOCUMENTS_BUCKET=${local.documents_bucket_name}" >> .env
+    echo "SOAR_RESPONSE_API_URL=http://$PRIVATE_IP:8088/respond/ssh-compromise" >> .env
 
     cat > /etc/systemd/system/soar-response-api.service <<'SERVICE'
     [Unit]
