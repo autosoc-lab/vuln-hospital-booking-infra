@@ -72,14 +72,6 @@ resource "aws_security_group" "shuffle" {
     cidr_blocks = [var.vpc_cidr]
   }
 
-  ingress {
-    description = "Discord alert dedup API - VPC internal Shuffle callback"
-    from_port   = 8089
-    to_port     = 8089
-    protocol    = "tcp"
-    cidr_blocks = [var.vpc_cidr]
-  }
-
   egress {
     description = "Allow all outbound"
     from_port   = 0
@@ -238,10 +230,7 @@ resource "aws_instance" "shuffle" {
     cat > /opt/soar/scripts/soar-response-api.py <<'SOAR_RESPONSE_API'
     ${file("${path.module}/files/soar-response-api.py")}
     SOAR_RESPONSE_API
-    cat > /opt/soar/scripts/discord-alert-api.py <<'DISCORD_ALERT_API'
-    ${file("${path.module}/files/discord-alert-api.py")}
-    DISCORD_ALERT_API
-    chmod 755 /opt/soar/scripts/respond-ssh-compromise.sh /opt/soar/scripts/soar-response-api.py /opt/soar/scripts/discord-alert-api.py
+    chmod 755 /opt/soar/scripts/respond-ssh-compromise.sh /opt/soar/scripts/soar-response-api.py
 
     mkdir -p shuffle-apps shuffle-files shuffle-database
     cp .env.example .env
@@ -262,9 +251,8 @@ resource "aws_instance" "shuffle" {
     sed -i "s|^SHUFFLE_DEFAULT_USERNAME=.*|SHUFFLE_DEFAULT_USERNAME=${var.shuffle_admin_username}|" .env
     sed -i "s|^SHUFFLE_DEFAULT_PASSWORD=.*|SHUFFLE_DEFAULT_PASSWORD=${var.shuffle_admin_password}|" .env
 
-    # Discord 웹훅 URL은 외부로 직접 노출하지 않고 dedup API가 사용한다.
+    # Discord 웹훅 URL을 .env에 추가 → bootstrap-import.sh가 워크플로의 Discord url에 주입.
     echo "DISCORD_WEBHOOK_URL=${var.discord_webhook_url}" >> .env
-    echo "DISCORD_DEDUP_TTL_SECONDS=600" >> .env
     echo "AWS_REGION=ap-northeast-2" >> .env
     echo "SOAR_APP_INSTANCE_TAG_NAME=${local.app_instance_name}" >> .env
     echo "SOAR_APP_SECURITY_GROUP_ID=${var.app_security_group_id}" >> .env
@@ -272,7 +260,6 @@ resource "aws_instance" "shuffle" {
     echo "SOAR_LEAKED_S3_KEY_USER_NAME=${local.leaked_s3_key_user}" >> .env
     echo "SOAR_DOCUMENTS_BUCKET=${local.documents_bucket_name}" >> .env
     echo "SOAR_RESPONSE_API_URL=http://$PRIVATE_IP:8088/respond/ssh-compromise" >> .env
-    echo "DISCORD_ALERT_API_URL=http://$PRIVATE_IP:8089/alert/discord" >> .env
 
     cat > /etc/systemd/system/soar-response-api.service <<'SERVICE'
     [Unit]
@@ -289,24 +276,8 @@ resource "aws_instance" "shuffle" {
     [Install]
     WantedBy=multi-user.target
     SERVICE
-    cat > /etc/systemd/system/discord-alert-api.service <<'SERVICE'
-    [Unit]
-    Description=Vuln Hospital Discord alert dedup API
-    After=network-online.target
-
-    [Service]
-    Type=simple
-    EnvironmentFile=/opt/soar/.env
-    ExecStart=/usr/bin/python3 /opt/soar/scripts/discord-alert-api.py
-    Restart=always
-    RestartSec=5
-
-    [Install]
-    WantedBy=multi-user.target
-    SERVICE
     systemctl daemon-reload
     systemctl enable --now soar-response-api.service
-    systemctl enable --now discord-alert-api.service
 
     docker compose up -d
 
