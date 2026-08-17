@@ -139,17 +139,9 @@ resource "aws_iam_instance_profile" "wazuh_ec2" {
   role = aws_iam_role.wazuh_ec2.name
 }
 
-# local_rules.xml/vuln_hospital_ssh_compromise.xml/디코더는 EC2 user_data 16KB 한도를 넘어서
-# 직접 임베드할 수 없다. 이미 CloudTrail/VPC Flow Logs가 쌓이는 로그 버킷에 별도 prefix로
-# 얹어두고, wazuh EC2 역할이 이미 그 버킷 전체에 대해 가진 s3:GetObject/ListBucket 권한
-# (wazuh_logs_read)을 그대로 재사용한다.
-resource "aws_s3_object" "hospital_local_rules" {
-  bucket  = var.log_bucket_name
-  key     = "wazuh-rules/local_rules.xml"
-  content = file("${path.module}/files/local_rules.xml")
-  etag    = filemd5("${path.module}/files/local_rules.xml")
-}
-
+# vuln_hospital_ssh_compromise.xml/디코더는 EC2 user_data 16KB 한도를 넘어서 직접 임베드할 수 없다.
+# 이미 CloudTrail/VPC Flow Logs가 쌓이는 로그 버킷에 별도 prefix로 얹어두고, wazuh EC2 역할이
+# 이미 그 버킷 전체에 대해 가진 s3:GetObject/ListBucket 권한(wazuh_logs_read)을 그대로 재사용한다.
 resource "aws_s3_object" "hospital_ssh_compromise_rules" {
   bucket  = var.log_bucket_name
   key     = "wazuh-rules/vuln_hospital_ssh_compromise.xml"
@@ -164,11 +156,16 @@ resource "aws_s3_object" "hospital_decoders" {
   etag    = filemd5("${path.module}/files/vuln_hospital_decoders.xml")
 }
 
+resource "aws_s3_object" "hospital_local_rules" {
+  bucket  = var.log_bucket_name
+  key     = "wazuh-rules/local_rules.xml"
+  content = file("${path.module}/files/local_rules.xml")
+  etag    = filemd5("${path.module}/files/local_rules.xml")
+}
+
 # Wazuh -> Shuffle SOAR 연동용 custom integration 스크립트 + 활성화 헬퍼.
-# 같은 이유(16KB user_data 한도)로 S3에 얹어서 배포한다. hook_url(Shuffle 웹훅 URL)은
-# Shuffle 워크플로를 만들어야 알 수 있는 값이라 여기서는 스크립트만 깔아두고, 실제
-# <integration> 블록 등록은 배포 후 enable-shuffle-integration.sh를 수동 실행해 켠다
-# (vuln-hospital-booking-soar/README.md 참고).
+# 같은 이유(16KB user_data 한도)로 S3에 얹어서 배포한다. 웹훅 hook id는 SOAR 저장소의
+# import 스크립트와 Terraform 변수에서 고정하므로 Wazuh 부팅 시 자동 등록된다.
 resource "aws_s3_object" "shuffle_integration_wrapper" {
   bucket  = var.log_bucket_name
   key     = "wazuh-rules/custom-shuffle"
@@ -203,9 +200,9 @@ resource "aws_instance" "wazuh" {
   user_data_replace_on_change = true
   # S3에 룰/디코더/integration 파일이 먼저 올라가 있어야 user_data의 aws s3 cp가 성공한다
   depends_on = [
-    aws_s3_object.hospital_local_rules,
     aws_s3_object.hospital_ssh_compromise_rules,
     aws_s3_object.hospital_decoders,
+    aws_s3_object.hospital_local_rules,
     aws_s3_object.shuffle_integration_wrapper,
     aws_s3_object.shuffle_integration_script,
     aws_s3_object.shuffle_integration_enable_script,
@@ -248,11 +245,9 @@ resource "aws_instance" "wazuh" {
 
     sed -i '/<ossec_config>/r /tmp/wodle_block.xml' /var/ossec/etc/ossec.conf
 
-    # SSRF -> IMDSv1 -> S3 sync(exfil) -> SSE-C 재암호화 -> lifecycle 삭제 체인 탐지용 커스텀 룰
-    # + 유출 SSH 키 기반 EC2 침해/권한상승/데이터반출 룰셋. GuardDuty가 이미 잡아주는
-    # "탈취한 임시자격증명이 EC2 밖에서 쓰임"(InstanceCredentialExfiltration) 단계는 별도
-    # 룰 없이 기본 aws 룰셋으로 커버되므로 여기서는 다루지 않음.
-    # 이 파일들(+디코더)은 EC2 user_data의 16KB 한도를 넘어서 직접 임베드할 수 없어 S3에 올려두고 받아온다.
+    # SSRF/S3/로그변조/VPC Flow Logs 탐지용 local_rules와 유출 SSH 키 기반 EC2 침해,
+    # 백업 헬퍼 권한 상승, DB 수집/반출 흐름 탐지용 룰셋을 S3에서 받아온다.
+    # 룰 파일은 EC2 user_data의 16KB 한도를 넘기 쉬워 직접 임베드하지 않는다.
     apt-get update -y
     apt-get install -y awscli
     aws s3 cp "s3://${var.log_bucket_name}/wazuh-rules/local_rules.xml" /var/ossec/etc/rules/local_rules.xml

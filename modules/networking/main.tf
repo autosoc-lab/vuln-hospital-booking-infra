@@ -130,6 +130,18 @@ resource "aws_security_group" "ec2" {
   })
 }
 
+# --- 보안그룹: SOAR 격리용 ---
+# 침해가 확증된 앱 EC2에 SOAR가 이 SG만 남기면 인바운드/아웃바운드가 모두 차단된다.
+resource "aws_security_group" "ec2_quarantine" {
+  name        = "${var.project_name}-ec2-quarantine-sg"
+  description = "SOAR quarantine security group for compromised EC2 instances"
+  vpc_id      = aws_vpc.main.id
+
+  tags = merge(var.common_tags, {
+    Name = "${var.project_name}-ec2-quarantine-sg"
+  })
+}
+
 # --- 보안그룹: RDS용 ---
 # EC2 보안그룹에서만 PostgreSQL(5432) 인바운드 허용 — 퍼블릭 노출 없음
 resource "aws_security_group" "rds" {

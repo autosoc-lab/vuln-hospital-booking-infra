@@ -9,18 +9,27 @@ data "aws_ami" "ubuntu" {
   }
 }
 
-# admin_cidr에 마스크(/32 등)가 없으면 단일 IP로 보고 /32를 자동으로 붙인다.
+# admin_cidr/admin_cidrs에 마스크(/32 등)가 없으면 단일 IP로 보고 /32를 자동으로 붙인다.
 # (사용자가 "1.2.3.4"만 넣어도 "1.2.3.4/32"로 처리)
 locals {
   admin_cidr_norm = var.admin_cidr == "" ? "" : (
     length(regexall("/", var.admin_cidr)) > 0 ? var.admin_cidr : "${var.admin_cidr}/32"
   )
+  admin_cidrs_norm = [
+    for cidr in compact(concat([local.admin_cidr_norm], var.admin_cidrs)) :
+    length(regexall("/", cidr)) > 0 ? cidr : "${cidr}/32"
+  ]
+  app_instance_name      = "${var.project_name}-app-server"
+  leaked_s3_key_user     = "${var.project_name}-leaked-s3-key"
+  leaked_s3_key_user_arn = "arn:aws:iam::${var.account_id}:user/${local.leaked_s3_key_user}"
+  documents_bucket_name  = "${var.project_name}-documents-${var.account_id}"
+  documents_bucket_arn   = "arn:aws:s3:::${local.documents_bucket_name}"
 }
 
 # --- 보안그룹: Shuffle SOAR용 ---
 # INTENTIONALLY PERMISSIVE - FOR LAB USE ONLY
 # 3001/3443은 0.0.0.0/0으로 열지 않는다. 웹훅은 Wazuh가 VPC 내부(사설IP)로 보내므로
-# vpc_cidr만 허용하면 되고, 대시보드는 관리자 IP(admin_cidr)만 허용한다. 이렇게 하면
+# vpc_cidr만 허용하면 되고, 대시보드는 관리자 IP(admin_cidrs)만 허용한다. 이렇게 하면
 # git에 웹훅 hook id가 있어도 외부에서 위조 POST를 보낼 수 없다(외부 도달 자체가 차단).
 resource "aws_security_group" "shuffle" {
   name_prefix = "${var.project_name}-shuffle-sg-"
@@ -44,7 +53,7 @@ resource "aws_security_group" "shuffle" {
     from_port   = 3001
     to_port     = 3001
     protocol    = "tcp"
-    cidr_blocks = compact([var.vpc_cidr, local.admin_cidr_norm])
+    cidr_blocks = concat([var.vpc_cidr], local.admin_cidrs_norm)
   }
 
   ingress {
@@ -52,7 +61,15 @@ resource "aws_security_group" "shuffle" {
     from_port   = 3443
     to_port     = 3443
     protocol    = "tcp"
-    cidr_blocks = compact([var.vpc_cidr, local.admin_cidr_norm])
+    cidr_blocks = concat([var.vpc_cidr], local.admin_cidrs_norm)
+  }
+
+  ingress {
+    description = "SOAR response API - VPC internal Wazuh callback"
+    from_port   = 8088
+    to_port     = 8088
+    protocol    = "tcp"
+    cidr_blocks = [var.vpc_cidr]
   }
 
   egress {
@@ -93,44 +110,69 @@ resource "aws_iam_role_policy_attachment" "shuffle_ssm" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
-# --- 2단계 자동조치 (완전자동): rule 100031 (문서 버킷 lifecycle 자동삭제 설정 변경 —
-# SSE-C 랜섬웨어의 복구불능화 단계) 발생 시, Shuffle이 즉시 lifecycle을 원복(삭제)한다.
-# 되돌리기 쉽고 부작용이 거의 없어 사람 승인 없이 자동화하는 유일한 조치.
-# "SOAR-100031" 브랜치 설계는 vuln-hospital-booking-soar/PLAYBOOKS.md 참고.
-resource "aws_iam_role_policy" "shuffle_lifecycle_revert" {
-  name = "${var.project_name}-shuffle-lifecycle-revert-policy"
-  role = aws_iam_role.shuffle_ec2.name
+resource "aws_iam_role_policy" "shuffle_soar_response" {
+  name = "${var.project_name}-shuffle-soar-response-policy"
+  role = aws_iam_role.shuffle_ec2.id
 
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
+        Sid      = "DescribeForTriage"
         Effect   = "Allow"
-        Action   = ["s3:GetLifecycleConfiguration", "s3:PutLifecycleConfiguration"]
-        Resource = var.documents_bucket_arn
-      }
-    ]
-  })
-}
-
-# --- 2단계 자동조치 (사람 승인형): rule 100014 (SSRF -> EC2 IMDS 크리덴셜 탈취 확증)
-# 발생 시, 승인을 거쳐 앱 EC2 role의 활성 STS 세션을 강제 무효화한다.
-# 탈취되는 게 IAM 유저 액세스키가 아니라 인스턴스 프로필 임시 세션이라
-# iam:UpdateAccessKey로는 무효화가 안 되고, aws:TokenIssueTime 조건부
-# Deny-all 인라인 정책을 붙이는 방식(AWS 콘솔 "Revoke active sessions"와 동일
-# 메커니즘)을 써야 한다. 서비스 중단을 유발할 수 있는 조치라 사람 승인 필수.
-# DeleteRolePolicy는 사고 종료 후 revoke 정책을 제거해 정상화하는 데 필요.
-resource "aws_iam_role_policy" "shuffle_revoke_session" {
-  name = "${var.project_name}-shuffle-revoke-session-policy"
-  role = aws_iam_role.shuffle_ec2.name
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
+        Action   = ["ec2:DescribeInstances", "ec2:DescribeSecurityGroups", "cloudtrail:LookupEvents"]
+        Resource = "*"
+      },
       {
+        Sid      = "QuarantineOnlyLabAppInstanceAttribute"
         Effect   = "Allow"
-        Action   = ["iam:PutRolePolicy", "iam:DeleteRolePolicy", "iam:GetRolePolicy"]
-        Resource = var.app_ec2_role_arn
+        Action   = ["ec2:ModifyInstanceAttribute"]
+        Resource = "arn:aws:ec2:*:${var.account_id}:instance/*"
+        Condition = {
+          StringEquals = {
+            "ec2:ResourceTag/Project" = var.project_name
+            "ec2:ResourceTag/Name"    = local.app_instance_name
+          }
+        }
+      },
+      {
+        Sid    = "AttachOnlyLabResponseSecurityGroups"
+        Effect = "Allow"
+        Action = ["ec2:ModifyInstanceAttribute"]
+        Resource = [
+          "arn:aws:ec2:*:${var.account_id}:security-group/${var.app_security_group_id}",
+          "arn:aws:ec2:*:${var.account_id}:security-group/${var.quarantine_security_group_id}"
+        ]
+      },
+      {
+        Sid      = "TagOnlyLabAppInstance"
+        Effect   = "Allow"
+        Action   = ["ec2:CreateTags"]
+        Resource = "arn:aws:ec2:*:${var.account_id}:instance/*"
+        Condition = {
+          StringEquals = {
+            "ec2:ResourceTag/Project" = var.project_name
+            "ec2:ResourceTag/Name"    = local.app_instance_name
+          }
+        }
+      },
+      {
+        Sid      = "DisableOnlyLabLeakedKey"
+        Effect   = "Allow"
+        Action   = ["iam:ListAccessKeys", "iam:UpdateAccessKey"]
+        Resource = local.leaked_s3_key_user_arn
+      },
+      {
+        Sid      = "ReadDocumentBucketForImpactReview"
+        Effect   = "Allow"
+        Action   = ["s3:GetBucketLocation", "s3:GetBucketVersioning", "s3:GetLifecycleConfiguration", "s3:ListBucket"]
+        Resource = local.documents_bucket_arn
+      },
+      {
+        Sid      = "ReadDocumentObjectMetadataForImpactReview"
+        Effect   = "Allow"
+        Action   = ["s3:GetObject", "s3:GetObjectVersion"]
+        Resource = "${local.documents_bucket_arn}/*"
       }
     ]
   })
@@ -170,7 +212,7 @@ resource "aws_instance" "shuffle" {
     echo '/swapfile none swap sw 0 0' >> /etc/fstab
 
     apt-get update -y
-    apt-get install -y git ca-certificates curl
+    apt-get install -y git ca-certificates curl awscli
     curl -fsSL https://get.docker.com | sh
     systemctl enable docker
     systemctl start docker
@@ -178,6 +220,17 @@ resource "aws_instance" "shuffle" {
 
     git clone -b ${var.soar_git_ref} https://github.com/autosoc-lab/vuln-hospital-booking-soar /opt/soar
     cd /opt/soar
+
+    # SOAR 대응 헬퍼는 Terraform 모듈에서도 직접 설치한다. 이렇게 해야 GitHub의
+    # soar_git_ref가 아직 갱신되지 않아도 terraform apply 즉시 자동 대응이 동작한다.
+    install -d -m 755 /opt/soar/scripts
+    cat > /opt/soar/scripts/respond-ssh-compromise.sh <<'SOAR_RESPONSE_SCRIPT'
+    ${file("${path.module}/files/respond-ssh-compromise.sh")}
+    SOAR_RESPONSE_SCRIPT
+    cat > /opt/soar/scripts/soar-response-api.py <<'SOAR_RESPONSE_API'
+    ${file("${path.module}/files/soar-response-api.py")}
+    SOAR_RESPONSE_API
+    chmod 755 /opt/soar/scripts/respond-ssh-compromise.sh /opt/soar/scripts/soar-response-api.py
 
     mkdir -p shuffle-apps shuffle-files shuffle-database
     cp .env.example .env
@@ -199,8 +252,32 @@ resource "aws_instance" "shuffle" {
     sed -i "s|^SHUFFLE_DEFAULT_PASSWORD=.*|SHUFFLE_DEFAULT_PASSWORD=${var.shuffle_admin_password}|" .env
 
     # Discord 웹훅 URL을 .env에 추가 → bootstrap-import.sh가 워크플로의 Discord url에 주입.
-    # .env.example엔 없는 키라 append. 빈 값이면 bootstrap이 주입을 건너뛴다.
     echo "DISCORD_WEBHOOK_URL=${var.discord_webhook_url}" >> .env
+    echo "AWS_REGION=ap-northeast-2" >> .env
+    echo "SOAR_APP_INSTANCE_TAG_NAME=${local.app_instance_name}" >> .env
+    echo "SOAR_APP_SECURITY_GROUP_ID=${var.app_security_group_id}" >> .env
+    echo "SOAR_QUARANTINE_SECURITY_GROUP_ID=${var.quarantine_security_group_id}" >> .env
+    echo "SOAR_LEAKED_S3_KEY_USER_NAME=${local.leaked_s3_key_user}" >> .env
+    echo "SOAR_DOCUMENTS_BUCKET=${local.documents_bucket_name}" >> .env
+    echo "SOAR_RESPONSE_API_URL=http://$PRIVATE_IP:8088/respond/ssh-compromise" >> .env
+
+    cat > /etc/systemd/system/soar-response-api.service <<'SERVICE'
+    [Unit]
+    Description=Vuln Hospital SOAR response API
+    After=network-online.target
+
+    [Service]
+    Type=simple
+    EnvironmentFile=/opt/soar/.env
+    ExecStart=/usr/bin/python3 /opt/soar/scripts/soar-response-api.py
+    Restart=always
+    RestartSec=5
+
+    [Install]
+    WantedBy=multi-user.target
+    SERVICE
+    systemctl daemon-reload
+    systemctl enable --now soar-response-api.service
 
     docker compose up -d
 

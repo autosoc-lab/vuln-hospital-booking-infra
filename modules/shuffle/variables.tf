@@ -66,24 +66,28 @@ variable "vpc_cidr" {
 }
 
 variable "admin_cidr" {
-  description = "대시보드 접속 허용 관리자 IP CIDR. 빈 값이면 외부 접속 규칙을 추가하지 않음."
+  description = "대시보드 접속 허용 관리자 IP CIDR 1개. 하위 호환용이며 여러 개는 admin_cidrs 사용."
   type        = string
   default     = ""
 }
 
-# --- 2단계 자동조치용 ---
+variable "admin_cidrs" {
+  description = "대시보드 접속 허용 관리자 IP CIDR 목록. 빈 목록이면 외부 접속 규칙을 추가하지 않음."
+  type        = list(string)
+  default     = []
+}
 
-variable "documents_bucket_arn" {
-  description = "문서 저장용 S3 버킷 ARN. rule 100031(lifecycle 자동삭제 설정) 발생 시 Shuffle이 lifecycle을 원복하는 데 필요."
+variable "account_id" {
+  description = "현재 AWS 계정 ID"
   type        = string
 }
 
-variable "app_ec2_role_arn" {
-  description = "앱 EC2 IAM role ARN. rule 100014(SSRF -> IMDS 크리덴셜 탈취 확증) 발생 시 Shuffle이 이 role의 활성 세션을 revoke하는 데 필요."
+variable "app_security_group_id" {
+  description = "정상 앱 EC2 보안그룹 ID"
   type        = string
 }
 
-variable "app_ec2_role_name" {
-  description = "앱 EC2 IAM role 이름. iam:PutRolePolicy/DeleteRolePolicy 호출 대상 지정에 필요."
+variable "quarantine_security_group_id" {
+  description = "침해 확증 시 앱 EC2에 적용할 격리 보안그룹 ID"
   type        = string
 }

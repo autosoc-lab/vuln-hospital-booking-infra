@@ -34,47 +34,20 @@ resource "aws_iam_role_policy_attachment" "ec2_ssm" {
 
 # EC2가 문서 저장용 S3 버킷을 읽고 쓸 수 있도록 부여하는 권한
 # INTENTIONALLY OVER-PROVISIONED - FOR LAB USE ONLY
-# 앱 자체는 PutLifecycleConfiguration을 쓸 일이 없으나, Capital One 사고의
-# "역할에 과도한 권한 부여" 원인을 재현하기 위해 의도적으로 포함함.
+# 버킷 단위로 액션을 정밀하게 스코프하는 대신, AWS 관리형 정책(AmazonS3FullAccess)을
+# 통째로 붙이는 흔한 지름길을 재현함 — 계정을 분리하지 않은 소규모 조직이
+# "일단 되게 하자"고 s3:*/Resource:*를 붙이고 넘어가는 패턴.
 # 이 권한 덕분에 SSRF→IMDSv1로 탈취한 임시 자격증명만으로
 # sync(exfil) → SSE-C 재암호화 → lifecycle 삭제 설정까지 전체 체인이 가능해짐.
+# (2026-04 AWS 기본 SSE-C 차단(BlockedEncryptionTypes)까지 GetEncryptionConfiguration/
+# PutEncryptionConfiguration로 무력화 가능 — Codefinger 체인이 끝까지 재현됨)
 #
-# GetEncryptionConfiguration/PutEncryptionConfiguration: 2026-04부터 AWS가
-# SSE-C 이력이 없는 버킷에 기본으로 SSE-C 업로드를 차단하기 시작하면서
-# (BlockedEncryptionTypes) 2025년 원본 Codefinger 체인이 이 role 권한만으로는
-# 더 이상 끝까지 재현되지 않게 됨. "SSRF 하나로 전체 체인 완결"이라는 랩 설계
-# 의도를 유지하기 위해, 이 신규 기본 방어까지 무력화할 수 있는 권한을
-# 의도적으로 추가함 — 2025년식 과다권한보다 한 단계 더 심한, 그러나 실제로도
-# 있을 법한 과다권한 설정 실수를 반영.
-resource "aws_iam_role_policy" "documents_s3" {
-  name = "${var.project_name}-ec2-documents-s3-policy"
-  role = aws_iam_role.ec2_ssm.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect   = "Allow"
-        Action   = ["s3:ListBucket", "s3:GetBucketVersioning", "s3:GetLifecycleConfiguration"]
-        Resource = aws_s3_bucket.documents.arn
-      },
-      {
-        Effect   = "Allow"
-        Action   = ["s3:GetObject", "s3:PutObject"]
-        Resource = "${aws_s3_bucket.documents.arn}/*"
-      },
-      {
-        Effect   = "Allow"
-        Action   = ["s3:PutLifecycleConfiguration"]
-        Resource = aws_s3_bucket.documents.arn
-      },
-      {
-        Effect   = "Allow"
-        Action   = ["s3:GetEncryptionConfiguration", "s3:PutEncryptionConfiguration"]
-        Resource = aws_s3_bucket.documents.arn
-      }
-    ]
-  })
+# 참고: 계정 내 로그/CloudTrail 버킷(security_monitoring 모듈의 aws_s3_bucket.logs)도
+# 같은 계정에 있어 이 권한 범위에 함께 포함됨 — 계정을 분리하지 않은 조직에서
+# 실제로 벌어지는 부수 피해(로그 버킷까지 노출)를 그대로 반영.
+resource "aws_iam_role_policy_attachment" "documents_s3" {
+  role       = aws_iam_role.ec2_ssm.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonS3FullAccess"
 }
 
 # Capital One 사고 4단계~5단계 재현용: 탈취한 임시 자격증명으로 공격자가
@@ -100,11 +73,14 @@ resource "aws_iam_role_policy" "self_inspection" {
         Resource = aws_iam_role.ec2_ssm.arn
       },
       {
-        # ListAttachedRolePolicies로 찾은 관리형 정책(AmazonSSMManagedInstanceCore)의
-        # 실제 내용까지 확인하려면 정책 리소스 자체에 대한 권한이 별도로 필요함
+        # ListAttachedRolePolicies로 찾은 관리형 정책의 실제 내용까지 확인하려면
+        # 정책 리소스 자체에 대한 권한이 별도로 필요함. 정책 ARN을 하나씩 못박으면
+        # 관리형 정책을 새로 붙일 때마다(예: AmazonS3FullAccess 추가) 이 목록도 같이
+        # 고쳐야 하는데, 실무에서 그 유지보수를 귀찮아해 "읽기 전용이니 상관없다"고
+        # Resource="*"로 퉁치는 경우가 흔함 — 그 지름길을 재현.
         Effect   = "Allow"
         Action   = ["iam:GetPolicy", "iam:GetPolicyVersion"]
-        Resource = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+        Resource = "*"
       },
       {
         # `aws s3 ls` (버킷 지정 없이) 로 계정 전체 버킷 목록 열거 - 특정 버킷 리소스로

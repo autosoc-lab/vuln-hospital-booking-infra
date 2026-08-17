@@ -46,7 +46,7 @@ module "wazuh" {
   log_bucket_arn        = module.security_monitoring.log_bucket_arn
   wazuh_version         = var.wazuh_version
   # Shuffle EIP를 넘겨서 wazuh가 부팅 때 웹훅 <integration>을 자동 등록하게 함
-  shuffle_private_ip    = module.shuffle.private_ip
+  shuffle_private_ip = module.shuffle.private_ip
 }
 
 # 4. Shuffle SOAR 계층 — Wazuh 알림을 받아 대응 워크플로를 실행하는 자동화 서버
@@ -55,26 +55,23 @@ module "wazuh" {
 module "shuffle" {
   source = "./modules/shuffle"
 
-  project_name                = var.project_name
-  common_tags                 = local.common_tags
-  vpc_id                      = module.networking.vpc_id
-  public_subnet_id            = module.networking.public_subnet_id
-  key_pair_name               = aws_key_pair.app.key_name
-  soar_git_ref                = var.soar_git_ref
-  shuffle_admin_username      = var.shuffle_admin_username
-  shuffle_admin_password      = var.shuffle_admin_password
-  shuffle_encryption_modifier = var.shuffle_encryption_modifier
-  shuffle_opensearch_password = var.shuffle_opensearch_password
-  discord_webhook_url         = var.discord_webhook_url
-  vpc_cidr                    = module.networking.vpc_cidr
-  admin_cidr                  = var.admin_cidr
-
-  # module.app 의 output을 직접 참조하면 shuffle -> app -> wazuh(shuffle_private_ip 필요) ->
-  # shuffle 순환 의존성이 생긴다. app 모듈의 문서 버킷/EC2 role 이름은 project_name/account_id로
-  # 결정되는 고정 패턴(modules/app/main.tf 참고)이라 여기서 직접 조립해 순환을 피한다.
-  documents_bucket_arn = "arn:aws:s3:::${var.project_name}-documents-${local.account_id}"
-  app_ec2_role_arn     = "arn:aws:iam::${local.account_id}:role/${var.project_name}-ec2-ssm-role"
-  app_ec2_role_name    = "${var.project_name}-ec2-ssm-role"
+  project_name                  = var.project_name
+  common_tags                   = local.common_tags
+  vpc_id                        = module.networking.vpc_id
+  public_subnet_id              = module.networking.public_subnet_id
+  key_pair_name                 = aws_key_pair.app.key_name
+  soar_git_ref                  = var.soar_git_ref
+  shuffle_admin_username        = var.shuffle_admin_username
+  shuffle_admin_password        = var.shuffle_admin_password
+  shuffle_encryption_modifier   = var.shuffle_encryption_modifier
+  shuffle_opensearch_password   = var.shuffle_opensearch_password
+  discord_webhook_url           = var.discord_webhook_url
+  vpc_cidr                      = module.networking.vpc_cidr
+  admin_cidr                    = var.admin_cidr
+  admin_cidrs                   = var.admin_cidrs
+  account_id                    = local.account_id
+  app_security_group_id         = module.networking.ec2_security_group_id
+  quarantine_security_group_id  = module.networking.ec2_quarantine_security_group_id
 }
 
 # 5. C2/수집 서버 — 공격자 소유로 가정하는 독립 EC2 (RCE/SSRF 실습에서 탈취 데이터를 받는 쪽)
