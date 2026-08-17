@@ -46,7 +46,7 @@ module "wazuh" {
   log_bucket_arn        = module.security_monitoring.log_bucket_arn
   wazuh_version         = var.wazuh_version
   # Shuffle EIP를 넘겨서 wazuh가 부팅 때 웹훅 <integration>을 자동 등록하게 함
-  shuffle_private_ip    = module.shuffle.private_ip
+  shuffle_private_ip = module.shuffle.private_ip
 }
 
 # 4. Shuffle SOAR 계층 — Wazuh 알림을 받아 대응 워크플로를 실행하는 자동화 서버
@@ -55,19 +55,22 @@ module "wazuh" {
 module "shuffle" {
   source = "./modules/shuffle"
 
-  project_name                = var.project_name
-  common_tags                 = local.common_tags
-  vpc_id                      = module.networking.vpc_id
-  public_subnet_id            = module.networking.public_subnet_id
-  key_pair_name               = aws_key_pair.app.key_name
-  soar_git_ref                = var.soar_git_ref
-  shuffle_admin_username      = var.shuffle_admin_username
-  shuffle_admin_password      = var.shuffle_admin_password
-  shuffle_encryption_modifier = var.shuffle_encryption_modifier
-  shuffle_opensearch_password = var.shuffle_opensearch_password
-  discord_webhook_url         = var.discord_webhook_url
-  vpc_cidr                    = module.networking.vpc_cidr
-  admin_cidr                  = var.admin_cidr
+  project_name                 = var.project_name
+  common_tags                  = local.common_tags
+  vpc_id                       = module.networking.vpc_id
+  public_subnet_id             = module.networking.public_subnet_id
+  key_pair_name                = aws_key_pair.app.key_name
+  account_id                   = local.account_id
+  soar_git_ref                 = var.soar_git_ref
+  shuffle_admin_username       = var.shuffle_admin_username
+  shuffle_admin_password       = var.shuffle_admin_password
+  shuffle_encryption_modifier  = var.shuffle_encryption_modifier
+  shuffle_opensearch_password  = var.shuffle_opensearch_password
+  discord_webhook_url          = var.discord_webhook_url
+  vpc_cidr                     = module.networking.vpc_cidr
+  admin_cidr                   = var.admin_cidr
+  app_security_group_id        = module.networking.ec2_security_group_id
+  quarantine_security_group_id = module.networking.ec2_quarantine_security_group_id
 }
 
 # 5. C2/수집 서버 — 공격자 소유로 가정하는 독립 EC2 (RCE/SSRF 실습에서 탈취 데이터를 받는 쪽)

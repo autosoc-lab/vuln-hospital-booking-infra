@@ -70,3 +70,18 @@ variable "admin_cidr" {
   type        = string
   default     = ""
 }
+
+variable "account_id" {
+  description = "현재 AWS 계정 ID"
+  type        = string
+}
+
+variable "app_security_group_id" {
+  description = "정상 앱 EC2 보안그룹 ID"
+  type        = string
+}
+
+variable "quarantine_security_group_id" {
+  description = "침해 확증 시 앱 EC2에 적용할 격리 보안그룹 ID"
+  type        = string
+}

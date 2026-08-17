@@ -15,6 +15,11 @@ locals {
   admin_cidr_norm = var.admin_cidr == "" ? "" : (
     length(regexall("/", var.admin_cidr)) > 0 ? var.admin_cidr : "${var.admin_cidr}/32"
   )
+  app_instance_name      = "${var.project_name}-app-server"
+  leaked_s3_key_user     = "${var.project_name}-leaked-s3-key"
+  leaked_s3_key_user_arn = "arn:aws:iam::${var.account_id}:user/${local.leaked_s3_key_user}"
+  documents_bucket_name  = "${var.project_name}-documents-${var.account_id}"
+  documents_bucket_arn   = "arn:aws:s3:::${local.documents_bucket_name}"
 }
 
 # --- 보안그룹: Shuffle SOAR용 ---
@@ -55,6 +60,14 @@ resource "aws_security_group" "shuffle" {
     cidr_blocks = compact([var.vpc_cidr, local.admin_cidr_norm])
   }
 
+  ingress {
+    description = "SOAR response API - VPC internal Wazuh callback"
+    from_port   = 8088
+    to_port     = 8088
+    protocol    = "tcp"
+    cidr_blocks = [var.vpc_cidr]
+  }
+
   egress {
     description = "Allow all outbound"
     from_port   = 0
@@ -93,6 +106,53 @@ resource "aws_iam_role_policy_attachment" "shuffle_ssm" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
+resource "aws_iam_role_policy" "shuffle_soar_response" {
+  name = "${var.project_name}-shuffle-soar-response-policy"
+  role = aws_iam_role.shuffle_ec2.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid      = "DescribeForTriage"
+        Effect   = "Allow"
+        Action   = ["ec2:DescribeInstances", "ec2:DescribeSecurityGroups", "cloudtrail:LookupEvents"]
+        Resource = "*"
+      },
+      {
+        Sid      = "QuarantineOnlyLabAppInstance"
+        Effect   = "Allow"
+        Action   = ["ec2:ModifyInstanceAttribute", "ec2:CreateTags"]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "ec2:ResourceTag/Project" = var.project_name
+            "ec2:ResourceTag/Name"    = local.app_instance_name
+          }
+        }
+      },
+      {
+        Sid      = "DisableOnlyLabLeakedKey"
+        Effect   = "Allow"
+        Action   = ["iam:ListAccessKeys", "iam:UpdateAccessKey"]
+        Resource = local.leaked_s3_key_user_arn
+      },
+      {
+        Sid      = "ReadDocumentBucketForImpactReview"
+        Effect   = "Allow"
+        Action   = ["s3:GetBucketLocation", "s3:GetBucketVersioning", "s3:GetLifecycleConfiguration", "s3:ListBucket"]
+        Resource = local.documents_bucket_arn
+      },
+      {
+        Sid      = "ReadDocumentObjectMetadataForImpactReview"
+        Effect   = "Allow"
+        Action   = ["s3:GetObject", "s3:GetObjectVersion"]
+        Resource = "${local.documents_bucket_arn}/*"
+      }
+    ]
+  })
+}
+
 resource "aws_iam_instance_profile" "shuffle_ec2" {
   name = "${var.project_name}-shuffle-ec2-profile"
   role = aws_iam_role.shuffle_ec2.name
@@ -127,7 +187,7 @@ resource "aws_instance" "shuffle" {
     echo '/swapfile none swap sw 0 0' >> /etc/fstab
 
     apt-get update -y
-    apt-get install -y git ca-certificates curl
+    apt-get install -y git ca-certificates curl awscli
     curl -fsSL https://get.docker.com | sh
     systemctl enable docker
     systemctl start docker
@@ -135,6 +195,17 @@ resource "aws_instance" "shuffle" {
 
     git clone -b ${var.soar_git_ref} https://github.com/autosoc-lab/vuln-hospital-booking-soar /opt/soar
     cd /opt/soar
+
+    # SOAR 대응 헬퍼는 Terraform 모듈에서도 직접 설치한다. 이렇게 해야 GitHub의
+    # soar_git_ref가 아직 갱신되지 않아도 terraform apply 즉시 자동 대응이 동작한다.
+    install -d -m 755 /opt/soar/scripts
+    cat > /opt/soar/scripts/respond-ssh-compromise.sh <<'SOAR_RESPONSE_SCRIPT'
+    ${file("${path.module}/files/respond-ssh-compromise.sh")}
+    SOAR_RESPONSE_SCRIPT
+    cat > /opt/soar/scripts/soar-response-api.py <<'SOAR_RESPONSE_API'
+    ${file("${path.module}/files/soar-response-api.py")}
+    SOAR_RESPONSE_API
+    chmod 755 /opt/soar/scripts/respond-ssh-compromise.sh /opt/soar/scripts/soar-response-api.py
 
     mkdir -p shuffle-apps shuffle-files shuffle-database
     cp .env.example .env
@@ -158,6 +229,30 @@ resource "aws_instance" "shuffle" {
     # Discord 웹훅 URL을 .env에 추가 → bootstrap-import.sh가 워크플로의 Discord url에 주입.
     # .env.example엔 없는 키라 append. 빈 값이면 bootstrap이 주입을 건너뛴다.
     echo "DISCORD_WEBHOOK_URL=${var.discord_webhook_url}" >> .env
+    echo "AWS_REGION=ap-northeast-2" >> .env
+    echo "SOAR_APP_INSTANCE_TAG_NAME=${local.app_instance_name}" >> .env
+    echo "SOAR_APP_SECURITY_GROUP_ID=${var.app_security_group_id}" >> .env
+    echo "SOAR_QUARANTINE_SECURITY_GROUP_ID=${var.quarantine_security_group_id}" >> .env
+    echo "SOAR_LEAKED_S3_KEY_USER_NAME=${local.leaked_s3_key_user}" >> .env
+    echo "SOAR_DOCUMENTS_BUCKET=${local.documents_bucket_name}" >> .env
+
+    cat > /etc/systemd/system/soar-response-api.service <<'SERVICE'
+    [Unit]
+    Description=Vuln Hospital SOAR response API
+    After=network-online.target
+
+    [Service]
+    Type=simple
+    EnvironmentFile=/opt/soar/.env
+    ExecStart=/usr/bin/python3 /opt/soar/scripts/soar-response-api.py
+    Restart=always
+    RestartSec=5
+
+    [Install]
+    WantedBy=multi-user.target
+    SERVICE
+    systemctl daemon-reload
+    systemctl enable --now soar-response-api.service
 
     docker compose up -d
 

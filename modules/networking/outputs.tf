@@ -28,6 +28,11 @@ output "ec2_security_group_id" {
   value       = aws_security_group.ec2.id
 }
 
+output "ec2_quarantine_security_group_id" {
+  description = "SOAR 격리용 EC2 보안그룹 ID"
+  value       = aws_security_group.ec2_quarantine.id
+}
+
 output "rds_security_group_id" {
   description = "RDS용 보안그룹 ID"
   value       = aws_security_group.rds.id

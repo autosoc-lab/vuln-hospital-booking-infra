@@ -157,10 +157,8 @@ resource "aws_s3_object" "hospital_decoders" {
 }
 
 # Wazuh -> Shuffle SOAR 연동용 custom integration 스크립트 + 활성화 헬퍼.
-# 같은 이유(16KB user_data 한도)로 S3에 얹어서 배포한다. hook_url(Shuffle 웹훅 URL)은
-# Shuffle 워크플로를 만들어야 알 수 있는 값이라 여기서는 스크립트만 깔아두고, 실제
-# <integration> 블록 등록은 배포 후 enable-shuffle-integration.sh를 수동 실행해 켠다
-# (vuln-hospital-booking-soar/README.md 참고).
+# 같은 이유(16KB user_data 한도)로 S3에 얹어서 배포한다. 웹훅 hook id는 SOAR 저장소의
+# import 스크립트와 Terraform 변수에서 고정하므로 Wazuh 부팅 시 자동 등록된다.
 resource "aws_s3_object" "shuffle_integration_wrapper" {
   bucket  = var.log_bucket_name
   key     = "wazuh-rules/custom-shuffle"
