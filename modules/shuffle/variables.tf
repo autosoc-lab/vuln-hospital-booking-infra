@@ -101,13 +101,3 @@ variable "app_ec2_role_name" {
   description = "앱 EC2 IAM role 이름 - respond-session-revoke.sh가 aws iam put-role-policy --role-name에 사용"
   type        = string
 }
-
-variable "log_bucket_name" {
-  description = "soar-response-api.py를 user_data 16KB 한도 우회용으로 올려두는 로그 버킷 이름 (security_monitoring 모듈에서 전달)"
-  type        = string
-}
-
-variable "log_bucket_arn" {
-  description = "log_bucket_name의 ARN - shuffle EC2 role에 해당 오브젝트 read 권한 부여용"
-  type        = string
-}

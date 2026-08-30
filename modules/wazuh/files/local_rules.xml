@@ -118,7 +118,7 @@
        Shuffle "Wazuh Alert Router"의 Lifecycle_Revert 브랜치(100031/100032 ->
        respond-lifecycle-revert.sh, delete-bucket-lifecycle)가 실제로 승인 없이
        자동 실행된다 - vuln-hospital-booking-soar/workflows/Wazuh Alert Router.json,
-       vuln-hospital-booking-soar/playbook_ex.md 참고. -->
+       vuln-hospital-booking-soar/PLAYBOOKS.md 참고. -->
   <rule id="100031" level="12">
     <if_sid>80200</if_sid>
     <field name="aws.eventName">^PutBucketLifecycle$</field>
