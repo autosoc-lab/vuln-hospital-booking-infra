@@ -65,11 +65,11 @@ resource "aws_security_group" "shuffle" {
   }
 
   ingress {
-    description = "SOAR response API - VPC internal Wazuh callback"
+    description = "SOAR response API - VPC internal Wazuh callback + admin IP (Discord approval-link clicks)"
     from_port   = 8088
     to_port     = 8088
     protocol    = "tcp"
-    cidr_blocks = [var.vpc_cidr]
+    cidr_blocks = concat([var.vpc_cidr], local.admin_cidrs_norm)
   }
 
   egress {
@@ -217,6 +217,33 @@ resource "aws_iam_instance_profile" "shuffle_ec2" {
   role = aws_iam_role.shuffle_ec2.name
 }
 
+# soar-response-api.py는 승인대기(session-revoke) 플로우가 추가되며 다른 임베드 스크립트들과
+# 합쳐서 user_data 16KB 한도(aws_instance.user_data)를 넘어섰다. wazuh 모듈이 local_rules.xml에
+# 쓴 것과 동일한 우회 - 로그 버킷에 올려두고 부팅 시 aws s3 cp로 받아온다.
+resource "aws_s3_object" "soar_response_api" {
+  bucket  = var.log_bucket_name
+  key     = "soar-scripts/soar-response-api.py"
+  content = file("${path.module}/files/soar-response-api.py")
+  etag    = filemd5("${path.module}/files/soar-response-api.py")
+}
+
+resource "aws_iam_role_policy" "shuffle_soar_scripts_read" {
+  name = "${var.project_name}-shuffle-soar-scripts-read-policy"
+  role = aws_iam_role.shuffle_ec2.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid      = "ReadSoarResponseApiScriptOnly"
+        Effect   = "Allow"
+        Action   = ["s3:GetObject"]
+        Resource = "${var.log_bucket_arn}/soar-scripts/soar-response-api.py"
+      }
+    ]
+  })
+}
+
 # --- Shuffle SOAR (frontend + backend + orborus + opensearch, docker compose 단일 노드) ---
 resource "aws_instance" "shuffle" {
   ami                         = data.aws_ami.ubuntu.id
@@ -228,6 +255,8 @@ resource "aws_instance" "shuffle" {
   iam_instance_profile        = aws_iam_instance_profile.shuffle_ec2.name
   # user_data는 최초 부팅 때만 실행되므로, 브랜치/시크릿이 바뀌면 새로 만들어 재실행되게 함
   user_data_replace_on_change = true
+  # S3에 soar-response-api.py가 먼저 올라가 있어야 user_data의 aws s3 cp가 성공한다
+  depends_on = [aws_s3_object.soar_response_api]
 
   # 기본 8GB로는 backend/frontend/orborus/opensearch/worker 이미지까지 받으면 디스크가 꽉 참
   root_block_device {
@@ -267,9 +296,9 @@ resource "aws_instance" "shuffle" {
     cat > /opt/soar/scripts/respond-session-revoke.sh <<'SOAR_SESSION_REVOKE'
     ${file("${path.module}/files/respond-session-revoke.sh")}
     SOAR_SESSION_REVOKE
-    cat > /opt/soar/scripts/soar-response-api.py <<'SOAR_RESPONSE_API'
-    ${file("${path.module}/files/soar-response-api.py")}
-    SOAR_RESPONSE_API
+    # soar-response-api.py는 user_data 16KB 한도를 넘어 직접 임베드할 수 없어 S3에서 받아온다
+    # (aws_s3_object.soar_response_api 참고). awscli는 위에서 이미 설치됨.
+    aws s3 cp "s3://${var.log_bucket_name}/soar-scripts/soar-response-api.py" /opt/soar/scripts/soar-response-api.py
     chmod 755 /opt/soar/scripts/respond-ssh-compromise.sh /opt/soar/scripts/respond-lifecycle-revert.sh /opt/soar/scripts/respond-session-revoke.sh /opt/soar/scripts/soar-response-api.py
 
     mkdir -p shuffle-apps shuffle-files shuffle-database
@@ -301,6 +330,8 @@ resource "aws_instance" "shuffle" {
     echo "SOAR_DOCUMENTS_BUCKET=${local.documents_bucket_name}" >> .env
     echo "SOAR_APP_EC2_ROLE_NAME=${var.app_ec2_role_name}" >> .env
     echo "SOAR_RESPONSE_API_URL=http://$PRIVATE_IP:8088/respond/ssh-compromise" >> .env
+    # Discord 승인 링크는 사람이 브라우저로 직접 클릭하므로 사설IP가 아니라 공인IP로 조립해야 한다.
+    echo "SOAR_PUBLIC_BASE_URL=http://$PUBLIC_IP:8088" >> .env
 
     cat > /etc/systemd/system/soar-response-api.service <<'SERVICE'
     [Unit]

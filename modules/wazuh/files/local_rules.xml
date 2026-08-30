@@ -153,33 +153,49 @@
        경우는 없다 - 공격자 본인이 재암호화한 객체를 자기 키로 다시 읽어가는
        경우(lifecycle 자동삭제 전 사본 확보, 이중공갈용)에만 발화하는 단일 이벤트
        확정 신호. 100020/100021(볼륨 기반 대량 다운로드 탐지)과 달리 속도에
-       관계없이 이 패턴 자체로 확정된다. -->
+       관계없이 이 패턴 자체로 확정된다.
+       httpStatusCode=200 요구: 헤더만 실려있고 실패(403/400)한 요청은 CloudTrail에
+       requestParameters가 그대로 찍히므로 헤더 유무만으로는 "진짜 그 키로 성공적으로
+       읽었다"를 보장 못 한다. 200을 요구하면 이 객체가 실제로 그 SSE-C 키로
+       재암호화(100030)돼 있었을 때만 통과하게 되어, 별도 상관분석 없이도 100030이
+       선행했음을 사실상 증명한다(아래 100034 설계 참고). -->
   <rule id="100033" level="13">
     <if_sid>80200</if_sid>
     <field name="aws.eventName">^GetObject$</field>
     <field name="aws.requestParameters.bucketName" type="pcre2">-documents-</field>
     <field name="aws.requestParameters.x-amz-server-side-encryption-customer-algorithm" type="pcre2">.+</field>
-    <description>SSE-C 커스텀 키로 문서 버킷 객체 조회 - 공격자가 자신이 재암호화한 사본을 반출하는 정황(Codefinger 이중공갈 패턴)</description>
+    <field name="aws.additionalEventData.httpStatusCode">^200$</field>
+    <description>SSE-C 커스텀 키로 문서 버킷 객체 조회 성공 - 공격자가 자신이 재암호화한 사본을 반출한 정황(Codefinger 이중공갈 패턴)</description>
     <mitre>
-      <id>T1005</id>
+      <id>T1530</id>
       <id>T1486</id>
     </mitre>
     <group>s3_ransomware,s3_exfil,</group>
   </rule>
 
-  <!-- 100034: 전체 체인 확증. 100032(재암호화+lifecycle 확증)가 같은 버킷에서
-       이미 떴고, 그 뒤 SSE-C 키로 조회(100033)까지 일어나면 재암호화 -> 삭제
-       예약 -> 반출까지 랜섬웨어 공격의 전 단계가 완결된 것으로 본다.
+  <!-- 100034: 전체 체인 확증.
+       원래 설계는 if_matched_sid=100032(재암호화+lifecycle 상관확증)였으나, Wazuh
+       룰 엔진은 같은 로그 한 줄에 대해 룰트리에서 가장 깊은 룰 하나만 "최종 당첨"시키고,
+       if_matched_sid 조회 대상 등록은 그 "최종 당첨 룰"에만 일어난다(직접 재현 확인됨).
+       PutBucketLifecycle 로그는 직전에 100030이 있으면 100031(레벨12)이 아니라 항상 더
+       깊은 100032(레벨15)가 최종 당첨되므로, 정작 우리가 원하는 시나리오(재암호화 후
+       lifecycle 변경)에서는 100031도 100032도 등록되지 않는다 - 100031을 직접 참조해도
+       똑같이 실패함을 확인했다. 그래서 100034는 100031/100032 둘 다 포기하고, 자기 로그
+       한 줄에서 경쟁하는 더 깊은 룰이 없어 항상 확실히 최종 당첨/등록되는 100030(재암호화
+       자체)을 직접 참조한다. lifecycle 단계(100031/100032)는 이제 100034의 필수
+       선행조건이 아니라 별도의 독립적인 조기경보로만 남는다(PLAYBOOKS.md 6-1: 완전자동
+       lifecycle 원복이 이미 그쪽에서 따로 처리됨). "재암호화 -> SSE-C로 반출 성공"
+       2단계는 위 100033의 httpStatusCode=200 조건과 결합해 여전히 100% 확증된다.
        timeframe은 100032와 동일하게 600초. -->
   <rule id="100034" level="15" timeframe="600">
     <if_sid>100033</if_sid>
-    <if_matched_sid>100032</if_matched_sid>
+    <if_matched_sid>100030</if_matched_sid>
     <same_field>aws.requestParameters.bucketName</same_field>
-    <description>SSE-C 랜섬웨어 체인 완전 확증: 재암호화 -> lifecycle 자동삭제 설정 -> SSE-C 키로 반출까지 전 단계 완료</description>
+    <description>SSE-C 랜섬웨어 반출 확증: 재암호화 -> SSE-C 키로 반출 성공</description>
     <mitre>
       <id>T1486</id>
       <id>T1485</id>
-      <id>T1005</id>
+      <id>T1530</id>
     </mitre>
     <group>s3_ransomware,attack_scenario,critical,</group>
   </rule>
