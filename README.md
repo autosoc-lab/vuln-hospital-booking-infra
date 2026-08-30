@@ -106,6 +106,7 @@ SQLi 요청은 `403 Forbidden`과 `X-Request-ID`가 포함된 커스텀 차단 �
 - C2 EC2(`modules/c2`): 재암호화한 문서를 반출받는 대상 서버
 
 실습 커맨드는 Notion 문서를 참고하세요.
+
 https://app.notion.com/p/SSRF-to-S3-SSE-C-Ransomware-Attack-Chain-PoC-3ababddcd58880cf9202eb18be524d89
 
 ## 유출 SSH 키 기반 EC2 침해 실습
@@ -123,6 +124,7 @@ https://app.notion.com/p/SSRF-to-S3-SSE-C-Ransomware-Attack-Chain-PoC-3ababddcd5
 - auditd/Wazuh FIM: 정찰 명령, 백업 경로 조사, 헬퍼 변조, root 표식 파일, 설정 복사, 수집/압축/전송/삭제 행위 감시
 
 실습 커맨드는 Notion 문서를 참고하세요.
+
 https://app.notion.com/p/SSH-EC2-POC-3b6abddcd58880d3bbafc25ff184736b
 
 ## Wazuh 탐지 룰
