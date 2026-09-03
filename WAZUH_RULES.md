@@ -51,4 +51,4 @@ Shuffle의 `soar-response-api.py`는 다음 룰 ID 발화 시 스크립트를 �
 | 100174, 100179, 100180 | `respond-ssh-compromise.sh` | 불필요 (완전자동) |
 | 100031, 100032 | `respond-lifecycle-revert.sh` | 불필요 (완전자동) |
 | 100014, 100034 | `respond-session-revoke.sh` | 불필요 (확증됨) |
-| 100013, 100033 | `respond-session-revoke.sh` | 필요 (미확증, 사람 승인 후) |
+| 100013, 100030, 100033 | `respond-session-revoke.sh` | 필요 (미확증, Discord 승인 링크 클릭 후) |

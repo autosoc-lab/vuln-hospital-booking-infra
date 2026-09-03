@@ -289,6 +289,10 @@ resource "aws_instance" "shuffle" {
     echo "SOAR_DOCUMENTS_BUCKET=${local.documents_bucket_name}" >> .env
     echo "SOAR_APP_EC2_ROLE_NAME=${var.app_ec2_role_name}" >> .env
     echo "SOAR_RESPONSE_API_URL=http://$PRIVATE_IP:8088/respond/ssh-compromise" >> .env
+    # Lifecycle_Revert/Session_Revoke_Auto/Session_Revoke_Request 노드는 워크플로 JSON에
+    # 사설IP가 하드코딩돼 있어서 인스턴스가 바뀌면(=사설IP가 바뀌면) 조용히 끊긴다.
+    # bootstrap-import.sh가 이 값으로 그 노드들의 url을 매 배포마다 다시 주입한다.
+    echo "SOAR_INTERNAL_BASE_URL=http://$PRIVATE_IP:8088" >> .env
     # Discord 승인 링크는 사람이 브라우저로 직접 클릭하므로 사설IP가 아니라 공인IP로 조립해야 한다.
     echo "SOAR_PUBLIC_BASE_URL=http://$PUBLIC_IP:8088" >> .env
 
